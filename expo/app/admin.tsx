@@ -60,9 +60,8 @@ import { useAdmin } from '@/providers/AdminProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useCoupon } from '@/providers/CouponProvider';
 import { mockWinners, mockGrandPrize } from '@/mocks/winners';
-import { isSupabaseConfigured } from '@/lib/supabase';
 import { hasTableMissingError, hasConfigError } from '@/services/database';
-import { Database, Sprout, AlertTriangle, Wifi, WifiOff } from 'lucide-react-native';
+import { Database, Sprout, AlertTriangle } from 'lucide-react-native';
 import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, GrandPrize, PromotionalQR } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -1123,7 +1122,6 @@ export default function AdminPanel() {
     getCityImage,
     seedDatabase,
     checkTables,
-    getSetupSQL,
     promoQRCodes,
     addPromoQR,
     updatePromoQR,
@@ -1162,7 +1160,7 @@ export default function AdminPanel() {
   });
 
   const [seeding, setSeeding] = useState<boolean>(false);
-  const [showSQLModal, setShowSQLModal] = useState<boolean>(false);
+
   const [couponFilterTab, setCouponFilterTab] = useState<'all' | 'active' | 'used' | 'sponsor'>('all');
   const [selectedCouponSponsor, setSelectedCouponSponsor] = useState<string>('');
 
@@ -1215,7 +1213,7 @@ export default function AdminPanel() {
       const exactMatch = grandPrizeConfig?.city === selectedCity ? grandPrizeConfig : null;
       const fallback = exactMatch ?? grandPrizeConfig;
       const prize = cp ?? fallback;
-      console.log('[Admin] Loading prize for city:', selectedCity, 'local:', !!cp, 'supabase fallback:', !!fallback, 'bgUrl:', prize?.backgroundImageUrl);
+      console.log('[Admin] Loading prize for city:', selectedCity, 'local:', !!cp, 'fallback:', !!fallback, 'bgUrl:', prize?.backgroundImageUrl);
       setPrizeMsg(prize?.description ?? '');
       setPrizeVal(prize?.value?.toString() ?? '10000');
       setPrizeDrawDate(prize?.drawDate ?? '2026-05-15');
@@ -1484,7 +1482,7 @@ export default function AdminPanel() {
         <TouchableOpacity
           style={a.actionRow}
           onPress={() => {
-            Alert.alert('Sincronizar Dados', 'Enviar todos os dados locais para o Supabase?', [
+            Alert.alert('Sincronizar Dados', 'Enviar todos os dados locais para o banco?', [
               { text: 'Cancelar', style: 'cancel' },
               {
                 text: 'Sincronizar',
@@ -1496,16 +1494,9 @@ export default function AdminPanel() {
                     const anyConfigError = hasConfigError(result.sponsors.error) || hasConfigError(result.winners.error);
 
                     if (anyConfigError) {
-                      Alert.alert('Supabase Nao Configurado', 'As variaveis de ambiente do Supabase nao estao configuradas. Verifique EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY.');
+                      Alert.alert('Banco Nao Configurado', 'O banco de dados remoto nao esta configurado.');
                     } else if (anyTableMissing) {
-                      Alert.alert(
-                        'Tabelas nao encontradas',
-                        'As tabelas do banco nao existem. Execute o SQL de setup no Supabase.',
-                        [
-                          { text: 'OK', style: 'cancel' },
-                          { text: 'Ver SQL', onPress: () => setShowSQLModal(true) },
-                        ],
-                      );
+                      Alert.alert('Tabelas nao encontradas', 'As tabelas do banco nao existem.');
                     } else {
                       Alert.alert(
                         allOk ? 'Sucesso' : 'Sincronizacao com Erros',
@@ -1525,7 +1516,7 @@ export default function AdminPanel() {
             <Database size={18} color={Colors.dark.neonGreen} />
           </View>
           <View style={a.actInfo}>
-            <Text style={a.actTtl}>Sincronizar com Supabase</Text>
+            <Text style={a.actTtl}>Sincronizar Dados</Text>
             <Text style={a.actSub}>Enviar dados para o banco de dados</Text>
           </View>
           <ChevronRight size={18} color={Colors.dark.textMuted} />
@@ -1540,7 +1531,7 @@ export default function AdminPanel() {
         onPress={() => {
             Alert.alert(
               'Seed Database',
-              'Isso vai popular o Supabase com todos os dados de exemplo (patrocinadores, ofertas, ganhadores, leaderboard e premio).\n\nDeseja continuar?',
+              'Isso vai popular o banco com todos os dados de exemplo (patrocinadores, ofertas, ganhadores, leaderboard e premio).\n\nDeseja continuar?',
               [
                 { text: 'Cancelar', style: 'cancel' },
                 {
@@ -1559,19 +1550,12 @@ export default function AdminPanel() {
                       if (anyConfigError) {
                         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                         Alert.alert(
-                          'Supabase Nao Configurado',
-                          'As variaveis de ambiente do Supabase nao estao configuradas.\n\nVerifique se EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY estao definidas no painel do projeto.',
+                          'Banco Nao Configurado',
+                          'O banco de dados remoto nao esta configurado.',
                         );
                       } else if (anyTableMissing) {
                         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                        Alert.alert(
-                          'Tabelas nao encontradas!',
-                          'As tabelas do banco de dados nao existem no Supabase. Execute o SQL de setup primeiro.',
-                          [
-                            { text: 'Cancelar', style: 'cancel' },
-                            { text: 'Ver SQL', onPress: () => setShowSQLModal(true) },
-                          ],
-                        );
+                        Alert.alert('Tabelas nao encontradas!', 'As tabelas do banco de dados nao existem.');
                       } else {
                         const sponsorStatus = result.sponsors.count > 0 ? `${result.sponsors.count} OK` : (result.sponsors.error ?? 'Falhou');
                         const winnersStatus = result.winners.ok ? 'OK' : (result.winners.error ?? 'Falhou');
@@ -1608,53 +1592,11 @@ export default function AdminPanel() {
           >
             <Sprout size={20} color="#fff" />
             <Text style={a.seedBtnTxt}>{seeding ? 'Populando banco...' : 'SEED DATABASE'}</Text>
-            <Text style={a.seedBtnSub}>Popular Supabase com dados de exemplo</Text>
+            <Text style={a.seedBtnSub}>Popular banco com dados de exemplo</Text>
           </LinearGradient>
       </TouchableOpacity>
 
-      <Modal visible={showSQLModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSQLModal(false)}>
-        <View style={{ flex: 1, backgroundColor: Colors.dark.background }}>
-          <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
-            <TouchableOpacity onPress={() => setShowSQLModal(false)} style={fm.closeBtn}>
-              <X size={22} color={Colors.dark.text} />
-            </TouchableOpacity>
-            <Text style={fm.headerTitle}>SQL Setup</Text>
-            <TouchableOpacity
-              onPress={async () => {
-                try {
-                  await Clipboard.setStringAsync(getSetupSQL());
-                  if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  Alert.alert('Copiado!', 'SQL copiado para a area de transferencia. Cole no Supabase SQL Editor.');
-                } catch {
-                  Alert.alert('Erro', 'Nao foi possivel copiar');
-                }
-              }}
-              style={fm.saveHeaderBtn}
-            >
-              <Text style={fm.saveHeaderTxt}>Copiar</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <View style={{ backgroundColor: Colors.dark.card, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <AlertTriangle size={18} color="#F59E0B" />
-                <Text style={{ color: '#FFBE0B', fontSize: 14, fontWeight: '700' as const }}>Instrucoes</Text>
-              </View>
-              <Text style={{ color: Colors.dark.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 16 }}>
-                1. Abra o Supabase Dashboard{"\n"}
-                2. Va em SQL Editor{"\n"}
-                3. Cole o SQL abaixo e execute{"\n"}
-                4. Volte aqui e clique em SEED DATABASE novamente
-              </Text>
-              <View style={{ backgroundColor: Colors.dark.surfaceLight, borderRadius: 8, padding: 12 }}>
-                <Text style={{ color: Colors.dark.text, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }} selectable>
-                  {getSetupSQL()}
-                </Text>
-              </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+
     </>
   );
 
