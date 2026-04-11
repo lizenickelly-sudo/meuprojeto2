@@ -1,0 +1,2583 @@
+// Admin Panel - Full sponsor management, coupon batches, notifications and database sync
+import React, { useState, useCallback, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Alert,
+  Platform,
+  Modal,
+  KeyboardAvoidingView,
+  Dimensions,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Image } from 'expo-image';
+import {
+  Shield,
+  Users,
+  Store,
+  Gift,
+  Trophy,
+  Trash2,
+  Edit3,
+  Plus,
+  Save,
+  ChevronRight,
+  ChevronDown,
+  ChevronLeft,
+  DollarSign,
+  Bell,
+  BarChart3,
+  X,
+  BadgeCheck,
+  ImageIcon,
+  Calendar,
+  Ticket,
+  Filter,
+  MapPin,
+  Hash,
+  Send,
+  Copy,
+  Check,
+  CircleDot,
+  Package,
+  Printer,
+  Globe,
+  Building2,
+  Map,
+} from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
+import * as Print from 'expo-print';
+import Colors from '@/constants/colors';
+import { useAdmin } from '@/providers/AdminProvider';
+import { useSponsor } from '@/providers/SponsorProvider';
+import { useCoupon } from '@/providers/CouponProvider';
+import { mockWinners, mockGrandPrize } from '@/mocks/winners';
+import { isSupabaseConfigured } from '@/lib/supabase';
+import { hasTableMissingError, hasConfigError } from '@/services/database';
+import { Database, Sprout, AlertTriangle, Wifi, WifiOff } from 'lucide-react-native';
+import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, GrandPrize, PromotionalQR } from '@/types';
+
+const { width: SCREEN_W } = Dimensions.get('window');
+
+type MainTab = 'overview' | 'states' | 'cities';
+type CitySubTab = 'prize' | 'sponsors' | 'coupons' | 'notifications' | 'promoqr';
+
+function TabButton({ label, active, onPress, icon: Icon }: { label: string; active: boolean; onPress: () => void; icon: React.ElementType }) {
+  return (
+    <TouchableOpacity
+      style={[tb.btn, active && tb.btnActive]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <Icon size={16} color={active ? '#000' : Colors.dark.textMuted} />
+      <Text style={[tb.txt, active && tb.txtActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const tb = StyleSheet.create({
+  btn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight },
+  btnActive: { backgroundColor: Colors.dark.neonGreen },
+  txt: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '600' as const },
+  txtActive: { color: '#000', fontWeight: '700' as const },
+});
+
+function StatCard({ icon: Icon, label, value, color }: { icon: React.ElementType; label: string; value: string; color: string }) {
+  return (
+    <View style={a.statCard}>
+      <View style={[a.statIcon, { backgroundColor: color + '18' }]}>
+        <Icon size={20} color={color} />
+      </View>
+      <Text style={a.statVal}>{value}</Text>
+      <Text style={a.statLbl}>{label}</Text>
+    </View>
+  );
+}
+
+function SponsorRow({ sponsor, onEdit, onDelete }: { sponsor: Sponsor; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <View style={a.spRow}>
+      <Image source={{ uri: sponsor.logoUrl }} style={a.spLogo} contentFit="cover" cachePolicy="memory-disk" />
+      <View style={a.spInfo}>
+        <View style={a.spNameRow}>
+          <Text style={a.spName} numberOfLines={1}>{sponsor.name}</Text>
+          {sponsor.verified && <BadgeCheck size={14} color={Colors.dark.neonGreen} />}
+        </View>
+        <Text style={a.spMeta}>{sponsor.category} - {sponsor.city}, {sponsor.state}</Text>
+        <Text style={a.spOffers}>{sponsor.offers.length} ofertas - Cupom: R$ {sponsor.couponValue ?? 0}</Text>
+      </View>
+      <View style={a.spActions}>
+        <TouchableOpacity style={a.spActBtn} onPress={onEdit} testID={`edit-sponsor-${sponsor.id}`}>
+          <Edit3 size={16} color={Colors.dark.neonGreen} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[a.spActBtn, a.spActDel]} onPress={onDelete} testID={`delete-sponsor-${sponsor.id}`}>
+          <Trash2 size={16} color={Colors.dark.danger} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+interface OfferFormItem {
+  id: string;
+  title: string;
+  description: string;
+  imageUrl: string;
+  discount: string;
+}
+
+interface SponsorFormData {
+  name: string;
+  category: string;
+  imageUrl: string;
+  logoUrl: string;
+  address: string;
+  city: string;
+  state: string;
+  phone: string;
+  description: string;
+  minPurchaseValue: string;
+  couponValue: string;
+  verified: boolean;
+  latitude: string;
+  longitude: string;
+  galleryImages: SponsorImage[];
+  offers: OfferFormItem[];
+}
+
+const emptySponsorForm: SponsorFormData = {
+  name: '',
+  category: '',
+  imageUrl: '',
+  logoUrl: '',
+  address: '',
+  city: 'Sao Paulo',
+  state: 'SP',
+  phone: '',
+  description: '',
+  minPurchaseValue: '50',
+  couponValue: '10',
+  verified: false,
+  latitude: '-23.5505',
+  longitude: '-46.6333',
+  galleryImages: [],
+  offers: [],
+};
+
+function SponsorFormModal({
+  visible,
+  onClose,
+  onSave,
+  initialData,
+  title,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSave: (data: SponsorFormData) => void;
+  initialData: SponsorFormData;
+  title: string;
+}) {
+  const [form, setForm] = useState<SponsorFormData>(initialData);
+  const insets = useSafeAreaInsets();
+  const [newImgPrice, setNewImgPrice] = useState<string>('');
+  const [newImgLabel, setNewImgLabel] = useState<string>('');
+  const [editingOfferIdx, setEditingOfferIdx] = useState<number | null>(null);
+  const [offerTitle, setOfferTitle] = useState<string>('');
+  const [offerDesc, setOfferDesc] = useState<string>('');
+  const [offerDiscount, setOfferDiscount] = useState<string>('');
+  const [offerImageUrl, setOfferImageUrl] = useState<string>('');
+  const [loadingLocation, setLoadingLocation] = useState<boolean>(false);
+
+  const updateField = useCallback((key: keyof SponsorFormData, value: string | boolean | SponsorImage[] | OfferFormItem[]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const getCurrentLocation = useCallback(async () => {
+    try {
+      setLoadingLocation(true);
+      if (Platform.OS === 'web') {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              updateField('latitude', position.coords.latitude.toString());
+              updateField('longitude', position.coords.longitude.toString());
+              setLoadingLocation(false);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            },
+            () => {
+              setLoadingLocation(false);
+              Alert.alert('Erro', 'Nao foi possivel obter a localizacao');
+            }
+          );
+        } else {
+          setLoadingLocation(false);
+          Alert.alert('Erro', 'Geolocalizacao nao suportada neste navegador');
+        }
+        return;
+      }
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLoadingLocation(false);
+        Alert.alert('Permissao negada', 'Permita o acesso a localizacao para usar esta funcao');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      updateField('latitude', loc.coords.latitude.toString());
+      updateField('longitude', loc.coords.longitude.toString());
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      Alert.alert('Erro', 'Nao foi possivel obter a localizacao');
+    } finally {
+      setLoadingLocation(false);
+    }
+  }, [updateField]);
+
+  const pickImage = useCallback(async (field: 'imageUrl' | 'logoUrl') => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: field === 'logoUrl' ? [1, 1] : [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      updateField(field, result.assets[0].uri);
+    }
+  }, [updateField]);
+
+  const pickGalleryImage = useCallback(async () => {
+    if (form.galleryImages.length >= 10) {
+      Alert.alert('Limite', 'Maximo de 10 imagens por patrocinador');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      const newImg: SponsorImage = {
+        id: `img_${Date.now()}`,
+        url: result.assets[0].uri,
+        price: newImgPrice ? parseFloat(newImgPrice) : undefined,
+        label: newImgLabel.trim() || undefined,
+      };
+      updateField('galleryImages', [...form.galleryImages, newImg]);
+      setNewImgPrice('');
+      setNewImgLabel('');
+    }
+  }, [form.galleryImages, newImgPrice, newImgLabel, updateField]);
+
+  const handleRemoveGalleryImage = useCallback((imgId: string) => {
+    updateField('galleryImages', form.galleryImages.filter((img) => img.id !== imgId));
+  }, [form.galleryImages, updateField]);
+
+  const handleSave = useCallback(() => {
+    if (!form.name.trim()) {
+      Alert.alert('Erro', 'Nome e obrigatorio');
+      return;
+    }
+    if (!form.category.trim()) {
+      Alert.alert('Erro', 'Categoria e obrigatoria');
+      return;
+    }
+    onSave(form);
+  }, [form, onSave]);
+
+  const resetOfferFields = useCallback(() => {
+    setEditingOfferIdx(null);
+    setOfferTitle('');
+    setOfferDesc('');
+    setOfferDiscount('');
+    setOfferImageUrl('');
+  }, []);
+
+  const handleAddOffer = useCallback(() => {
+    if (!offerTitle.trim()) {
+      Alert.alert('Erro', 'Titulo da promocao e obrigatorio');
+      return;
+    }
+    if (editingOfferIdx !== null) {
+      const updated = [...form.offers];
+      updated[editingOfferIdx] = {
+        ...updated[editingOfferIdx],
+        title: offerTitle.trim(),
+        description: offerDesc.trim(),
+        discount: offerDiscount.trim(),
+        imageUrl: offerImageUrl.trim(),
+      };
+      updateField('offers', updated);
+    } else {
+      const newOffer: OfferFormItem = {
+        id: `offer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: offerTitle.trim(),
+        description: offerDesc.trim(),
+        discount: offerDiscount.trim(),
+        imageUrl: offerImageUrl.trim(),
+      };
+      updateField('offers', [...form.offers, newOffer]);
+    }
+    resetOfferFields();
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }, [offerTitle, offerDesc, offerDiscount, offerImageUrl, editingOfferIdx, form.offers, updateField, resetOfferFields]);
+
+  const handleEditOffer = useCallback((idx: number) => {
+    const o = form.offers[idx];
+    setEditingOfferIdx(idx);
+    setOfferTitle(o.title);
+    setOfferDesc(o.description);
+    setOfferDiscount(o.discount);
+    setOfferImageUrl(o.imageUrl);
+  }, [form.offers]);
+
+  const handleRemoveOffer = useCallback((idx: number) => {
+    const updated = form.offers.filter((_, i) => i !== idx);
+    updateField('offers', updated);
+    if (editingOfferIdx === idx) resetOfferFields();
+  }, [form.offers, updateField, editingOfferIdx, resetOfferFields]);
+
+  const pickOfferImage = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setOfferImageUrl(result.assets[0].uri);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (visible) {
+      setForm(initialData);
+      setNewImgPrice('');
+      setNewImgLabel('');
+      resetOfferFields();
+    }
+  }, [visible, initialData, resetOfferFields]);
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={fm.container}
+      >
+        <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+          <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+            <X size={22} color={Colors.dark.text} />
+          </TouchableOpacity>
+          <Text style={fm.headerTitle}>{title}</Text>
+          <TouchableOpacity onPress={handleSave} style={fm.saveHeaderBtn}>
+            <Text style={fm.saveHeaderTxt}>Salvar</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={fm.scroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Informacoes Basicas</Text>
+            <View style={fm.field}>
+              <Text style={fm.label}>Nome da Loja *</Text>
+              <TextInput style={fm.input} value={form.name} onChangeText={(v) => updateField('name', v)} placeholder="Ex: Supermercado Bom Preco" placeholderTextColor={Colors.dark.textMuted} testID="sponsor-name-input" />
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Categoria *</Text>
+              <TextInput style={fm.input} value={form.category} onChangeText={(v) => updateField('category', v)} placeholder="Ex: Supermercado, Farmacia" placeholderTextColor={Colors.dark.textMuted} testID="sponsor-category-input" />
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Descricao</Text>
+              <TextInput style={[fm.input, fm.textArea]} value={form.description} onChangeText={(v) => updateField('description', v)} placeholder="Breve descricao da loja" placeholderTextColor={Colors.dark.textMuted} multiline numberOfLines={3} testID="sponsor-desc-input" />
+            </View>
+          </View>
+
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Imagens Principais</Text>
+            <View style={fm.field}>
+              <Text style={fm.label}>Imagem Principal</Text>
+              <TouchableOpacity style={fm.uploadBtn} onPress={() => pickImage('imageUrl')} activeOpacity={0.8} testID="sponsor-image-input">
+                {form.imageUrl ? (
+                  <Image source={{ uri: form.imageUrl }} style={fm.uploadPreview} contentFit="cover" />
+                ) : (
+                  <View style={fm.uploadPlaceholder}>
+                    <ImageIcon size={28} color={Colors.dark.neonGreen} />
+                    <Text style={fm.uploadPlaceholderTxt}>Toque para escolher foto</Text>
+                  </View>
+                )}
+                {form.imageUrl ? (
+                  <View style={fm.uploadOverlay}>
+                    <ImageIcon size={14} color="#fff" />
+                    <Text style={fm.uploadOverlayTxt}>Trocar Foto</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Logo</Text>
+              <TouchableOpacity style={fm.uploadLogoBtn} onPress={() => pickImage('logoUrl')} activeOpacity={0.8} testID="sponsor-logo-input">
+                {form.logoUrl ? (
+                  <Image source={{ uri: form.logoUrl }} style={fm.uploadLogoPreview} contentFit="cover" />
+                ) : (
+                  <View style={fm.uploadLogoPlaceholder}>
+                    <ImageIcon size={22} color={Colors.dark.neonGreen} />
+                  </View>
+                )}
+                <View style={fm.uploadLogoInfo}>
+                  <Text style={fm.uploadLogoTxt}>{form.logoUrl ? 'Trocar logo' : 'Escolher logo'}</Text>
+                  <Text style={fm.uploadLogoSub}>Formato quadrado recomendado</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Promocoes / Ofertas ({form.offers.length})</Text>
+            <Text style={fm.sectionSub}>Adicione promocoes e ofertas que aparecerao no perfil da loja</Text>
+            {form.offers.map((offer, idx) => (
+              <View key={offer.id} style={fm.offerItem}>
+                {offer.imageUrl ? (
+                  <Image source={{ uri: offer.imageUrl }} style={fm.offerThumb} contentFit="cover" />
+                ) : (
+                  <View style={[fm.offerThumb, fm.offerThumbPlaceholder]}>
+                    <Gift size={16} color={Colors.dark.textMuted} />
+                  </View>
+                )}
+                <View style={fm.offerInfo}>
+                  <Text style={fm.offerTitle} numberOfLines={1}>{offer.title}</Text>
+                  {offer.discount ? <Text style={fm.offerDiscount}>{offer.discount}</Text> : null}
+                  {offer.description ? <Text style={fm.offerDesc} numberOfLines={1}>{offer.description}</Text> : null}
+                </View>
+                <TouchableOpacity onPress={() => handleEditOffer(idx)} style={fm.offerEditBtn}>
+                  <Edit3 size={13} color={Colors.dark.neonGreen} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleRemoveOffer(idx)} style={fm.galleryRemove}>
+                  <X size={14} color={Colors.dark.danger} />
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            <View style={fm.addImgSection}>
+              <Text style={[fm.label, { marginBottom: 2 }]}>{editingOfferIdx !== null ? 'Editando Promocao' : 'Nova Promocao'}</Text>
+              <View style={fm.field}>
+                <Text style={fm.label}>Titulo *</Text>
+                <TextInput style={fm.input} value={offerTitle} onChangeText={setOfferTitle} placeholder="Ex: 20% OFF em toda a loja" placeholderTextColor={Colors.dark.textMuted} testID="offer-title-input" />
+              </View>
+              <View style={fm.field}>
+                <Text style={fm.label}>Desconto</Text>
+                <TextInput style={fm.input} value={offerDiscount} onChangeText={setOfferDiscount} placeholder="Ex: 20% OFF, R$ 10 desconto" placeholderTextColor={Colors.dark.textMuted} />
+              </View>
+              <View style={fm.field}>
+                <Text style={fm.label}>Descricao</Text>
+                <TextInput style={[fm.input, { minHeight: 60, textAlignVertical: 'top' as const }]} value={offerDesc} onChangeText={setOfferDesc} placeholder="Descricao da promocao" placeholderTextColor={Colors.dark.textMuted} multiline />
+              </View>
+              <View style={fm.field}>
+                <Text style={fm.label}>Imagem da Promocao</Text>
+                <TouchableOpacity style={fm.offerImgPickBtn} onPress={pickOfferImage} activeOpacity={0.8}>
+                  {offerImageUrl ? (
+                    <Image source={{ uri: offerImageUrl }} style={fm.offerImgPreview} contentFit="cover" />
+                  ) : (
+                    <View style={fm.offerImgPlaceholder}>
+                      <ImageIcon size={20} color={Colors.dark.neonGreen} />
+                      <Text style={fm.offerImgPlaceholderTxt}>Escolher Imagem</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <View style={fm.offerBtnRow}>
+                <TouchableOpacity style={fm.offerSaveBtn} onPress={handleAddOffer} activeOpacity={0.8}>
+                  <Save size={14} color="#000" />
+                  <Text style={fm.offerSaveBtnTxt}>{editingOfferIdx !== null ? 'Atualizar' : 'Adicionar'}</Text>
+                </TouchableOpacity>
+                {editingOfferIdx !== null && (
+                  <TouchableOpacity style={fm.offerCancelBtn} onPress={resetOfferFields} activeOpacity={0.8}>
+                    <X size={14} color={Colors.dark.textMuted} />
+                    <Text style={fm.offerCancelBtnTxt}>Cancelar</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Galeria de Imagens ({form.galleryImages.length}/10)</Text>
+            <Text style={fm.sectionSub}>Adicione ate 10 imagens com precos para exibir no perfil</Text>
+            {form.galleryImages.map((img) => (
+              <View key={img.id} style={fm.galleryItem}>
+                <Image source={{ uri: img.url }} style={fm.galleryThumb} contentFit="cover" />
+                <View style={fm.galleryInfo}>
+                  <Text style={fm.galleryLabel} numberOfLines={1}>{img.label || 'Sem titulo'}</Text>
+                  {img.price !== undefined && <Text style={fm.galleryPrice}>R$ {img.price.toFixed(2)}</Text>}
+                </View>
+                <TouchableOpacity onPress={() => handleRemoveGalleryImage(img.id)} style={fm.galleryRemove}>
+                  <X size={14} color={Colors.dark.danger} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {form.galleryImages.length < 10 && (
+              <View style={fm.addImgSection}>
+                <View style={fm.row}>
+                  <View style={[fm.field, { flex: 1 }]}>
+                    <Text style={fm.label}>Titulo</Text>
+                    <TextInput style={fm.input} value={newImgLabel} onChangeText={setNewImgLabel} placeholder="Ex: Produto A" placeholderTextColor={Colors.dark.textMuted} />
+                  </View>
+                  <View style={[fm.field, { width: 100 }]}>
+                    <Text style={fm.label}>Preco (R$)</Text>
+                    <TextInput style={fm.input} value={newImgPrice} onChangeText={setNewImgPrice} placeholder="0.00" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+                  </View>
+                </View>
+                <TouchableOpacity style={fm.addImgBtn} onPress={pickGalleryImage} activeOpacity={0.8}>
+                  <ImageIcon size={14} color={Colors.dark.neonGreen} />
+                  <Text style={fm.addImgBtnTxt}>Escolher Foto da Galeria</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Endereco Completo</Text>
+            <View style={fm.field}>
+              <Text style={fm.label}>Endereco</Text>
+              <TextInput style={fm.input} value={form.address} onChangeText={(v) => updateField('address', v)} placeholder="Rua, numero, bairro" placeholderTextColor={Colors.dark.textMuted} />
+            </View>
+            <View style={fm.row}>
+              <View style={[fm.field, { flex: 1 }]}>
+                <Text style={fm.label}>Cidade</Text>
+                <TextInput style={fm.input} value={form.city} onChangeText={(v) => updateField('city', v)} placeholder="Sao Paulo" placeholderTextColor={Colors.dark.textMuted} />
+              </View>
+              <View style={[fm.field, { width: 80 }]}>
+                <Text style={fm.label}>Estado</Text>
+                <TextInput style={fm.input} value={form.state} onChangeText={(v) => updateField('state', v)} placeholder="SP" placeholderTextColor={Colors.dark.textMuted} maxLength={2} autoCapitalize="characters" />
+              </View>
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Telefone</Text>
+              <TextInput style={fm.input} value={form.phone} onChangeText={(v) => updateField('phone', v)} placeholder="(11) 99999-0000" placeholderTextColor={Colors.dark.textMuted} keyboardType="phone-pad" />
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Localizacao</Text>
+              <TouchableOpacity style={fm.locationBtn} onPress={getCurrentLocation} activeOpacity={0.7} disabled={loadingLocation}>
+                <MapPin size={18} color={Colors.dark.neonGreen} />
+                <Text style={fm.locationBtnText}>{loadingLocation ? 'Obtendo localizacao...' : 'Usar local atual'}</Text>
+              </TouchableOpacity>
+              {form.latitude && form.longitude && form.latitude !== '-23.5505' ? (
+                <Text style={fm.locationInfo}>Lat: {parseFloat(form.latitude).toFixed(6)}  |  Lng: {parseFloat(form.longitude).toFixed(6)}</Text>
+              ) : null}
+            </View>
+          </View>
+
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Cupom e Valores</Text>
+            <View style={fm.row}>
+              <View style={[fm.field, { flex: 1 }]}>
+                <Text style={fm.label}>Valor do Cupom (R$)</Text>
+                <TextInput style={fm.input} value={form.couponValue} onChangeText={(v) => updateField('couponValue', v)} placeholder="10" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+              </View>
+              <View style={[fm.field, { flex: 1 }]}>
+                <Text style={fm.label}>Compra Minima (R$)</Text>
+                <TextInput style={fm.input} value={form.minPurchaseValue} onChangeText={(v) => updateField('minPurchaseValue', v)} placeholder="50" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+              </View>
+            </View>
+            <TouchableOpacity style={fm.toggleRow} onPress={() => updateField('verified', !form.verified)} activeOpacity={0.7}>
+              <BadgeCheck size={18} color={form.verified ? Colors.dark.neonGreen : Colors.dark.textMuted} />
+              <Text style={[fm.toggleLabel, form.verified && fm.toggleActive]}>Patrocinador Verificado</Text>
+              <View style={[fm.toggleSwitch, form.verified && fm.toggleSwitchActive]}>
+                <View style={[fm.toggleDot, form.verified && fm.toggleDotActive]} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={fm.saveFullBtn} onPress={handleSave} activeOpacity={0.8}>
+            <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={fm.saveFullGrad}>
+              <Save size={18} color="#000" />
+              <Text style={fm.saveFullTxt}>SALVAR PATROCINADOR</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const fm = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.dark.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12, backgroundColor: Colors.dark.surface, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
+  closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: Colors.dark.text, fontSize: 17, fontWeight: '700' as const },
+  saveHeaderBtn: { backgroundColor: Colors.dark.neonGreen, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  saveHeaderTxt: { color: '#000', fontSize: 14, fontWeight: '700' as const },
+  scroll: { padding: 16 },
+  section: { backgroundColor: Colors.dark.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  sectionTitle: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const, marginBottom: 4 },
+  sectionSub: { color: Colors.dark.textMuted, fontSize: 11, marginBottom: 14 },
+  field: { marginBottom: 12 },
+  label: { color: Colors.dark.textSecondary, fontSize: 12, fontWeight: '600' as const, marginBottom: 6 },
+  input: { backgroundColor: Colors.dark.inputBg, borderRadius: 12, padding: 12, color: Colors.dark.text, fontSize: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder },
+  textArea: { minHeight: 80, textAlignVertical: 'top' as const },
+  row: { flexDirection: 'row', gap: 10 },
+  uploadBtn: { borderRadius: 14, overflow: 'hidden', height: 160, backgroundColor: Colors.dark.surfaceLight, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint, borderStyle: 'dashed' as const, position: 'relative' as const },
+  uploadPreview: { width: '100%', height: '100%', borderRadius: 14 },
+  uploadPlaceholder: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 8 },
+  uploadPlaceholderTxt: { color: Colors.dark.neonGreen, fontSize: 13, fontWeight: '600' as const },
+  uploadOverlay: { position: 'absolute' as const, bottom: 0, left: 0, right: 0, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 8 },
+  uploadOverlayTxt: { color: '#fff', fontSize: 12, fontWeight: '600' as const },
+  uploadLogoBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 12, backgroundColor: Colors.dark.surfaceLight, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint, borderStyle: 'dashed' as const },
+  uploadLogoPreview: { width: 56, height: 56, borderRadius: 12, backgroundColor: Colors.dark.inputBg },
+  uploadLogoPlaceholder: { width: 56, height: 56, borderRadius: 12, backgroundColor: Colors.dark.inputBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  uploadLogoInfo: { flex: 1 },
+  uploadLogoTxt: { color: Colors.dark.neonGreen, fontSize: 14, fontWeight: '600' as const },
+  uploadLogoSub: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+  galleryItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.surfaceLight, borderRadius: 10, padding: 8, marginBottom: 8, gap: 10 },
+  galleryThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: Colors.dark.inputBg },
+  galleryInfo: { flex: 1 },
+  galleryLabel: { color: Colors.dark.text, fontSize: 13, fontWeight: '600' as const },
+  galleryPrice: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '700' as const, marginTop: 2 },
+  galleryRemove: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(239,68,68,0.1)', alignItems: 'center', justifyContent: 'center' },
+  addImgSection: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.dark.cardBorder },
+  addImgBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed' as const, borderColor: Colors.dark.neonGreen, marginTop: 4 },
+  addImgBtnTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '600' as const },
+  offerItem: { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: Colors.dark.surfaceLight, borderRadius: 10, padding: 8, marginBottom: 8, gap: 10 },
+  offerThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: Colors.dark.inputBg },
+  offerThumbPlaceholder: { alignItems: 'center' as const, justifyContent: 'center' as const },
+  offerInfo: { flex: 1 },
+  offerTitle: { color: Colors.dark.text, fontSize: 13, fontWeight: '600' as const },
+  offerDiscount: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '700' as const, marginTop: 2 },
+  offerDesc: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 1 },
+  offerEditBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+  offerImgPickBtn: { borderRadius: 12, overflow: 'hidden' as const, height: 100, backgroundColor: Colors.dark.surfaceLight, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint, borderStyle: 'dashed' as const },
+  offerImgPreview: { width: '100%' as any, height: '100%' as any, borderRadius: 12 },
+  offerImgPlaceholder: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6 },
+  offerImgPlaceholderTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '600' as const },
+  offerBtnRow: { flexDirection: 'row' as const, gap: 10, marginTop: 4 },
+  offerSaveBtn: { flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: Colors.dark.neonGreen, paddingVertical: 10, borderRadius: 10 },
+  offerSaveBtnTxt: { color: '#000', fontSize: 13, fontWeight: '700' as const },
+  offerCancelBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 4, backgroundColor: Colors.dark.surfaceLight, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10 },
+  offerCancelBtnTxt: { color: Colors.dark.textMuted, fontSize: 13, fontWeight: '600' as const },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: Colors.dark.cardBorder, marginTop: 4 },
+  toggleLabel: { flex: 1, color: Colors.dark.textSecondary, fontSize: 14, fontWeight: '500' as const },
+  toggleActive: { color: Colors.dark.text },
+  toggleSwitch: { width: 48, height: 28, borderRadius: 14, backgroundColor: Colors.dark.surfaceLight, padding: 3, justifyContent: 'center' },
+  toggleSwitchActive: { backgroundColor: Colors.dark.neonGreen },
+  toggleDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.dark.text },
+  toggleDotActive: { alignSelf: 'flex-end' as const },
+  saveFullBtn: { borderRadius: 14, overflow: 'hidden', marginTop: 4, shadowColor: "#00FF87", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  saveFullGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8 },
+  saveFullTxt: { color: '#000', fontSize: 15, fontWeight: '800' as const, letterSpacing: 0.5 },
+  locationBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint },
+  locationBtnText: { color: Colors.dark.neonGreen, fontSize: 14, fontWeight: '600' as const },
+  locationInfo: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 8 },
+});
+
+function generateQRCodePayload(batch: CouponBatch, code: string): string {
+  const payload = {
+    type: 'cashbox_coupon',
+    code,
+    value: batch.value,
+    sponsorId: batch.sponsorId,
+    sponsorName: batch.sponsorName,
+    batchId: batch.id,
+    createdAt: batch.createdAt,
+  };
+  return JSON.stringify(payload);
+}
+
+function generateThermalPrintHTML(batch: CouponBatch): string {
+  const dateStr = new Date(batch.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const codesHTML = batch.codes.map((code, i) => {
+    const qrData = encodeURIComponent(generateQRCodePayload(batch, code));
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrData}&format=png&margin=4`;
+    return `
+    <div class="coupon">
+      <div class="coupon-header">
+        <span class="idx">${String(i + 1).padStart(3, '0')}</span>
+        <span class="store">${batch.sponsorName}</span>
+      </div>
+      <div class="qr-container">
+        <img src="${qrUrl}" class="qr-img" alt="QR Code ${code}" />
+      </div>
+      <div class="code">${code}</div>
+      <div class="value">R$ ${batch.value.toFixed(2)}</div>
+      <div class="scan-hint">Escaneie o QR Code ou digite o codigo acima</div>
+      <div class="sep">- - - - - - - - - - - - - - - -</div>
+    </div>
+  `;
+  }).join('');
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    @page {
+      margin: 2mm;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      width: 72mm;
+      max-width: 72mm;
+      color: #000;
+      background: #fff;
+    }
+    .header {
+      text-align: center;
+      padding: 4mm 0;
+      border-bottom: 2px dashed #000;
+      margin-bottom: 3mm;
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: 1px;
+    }
+    .header .info {
+      font-size: 10px;
+      margin-top: 2mm;
+      color: #333;
+    }
+    .header .batch-id {
+      font-size: 9px;
+      color: #666;
+      margin-top: 1mm;
+    }
+    .summary {
+      text-align: center;
+      padding: 2mm 0 3mm;
+      border-bottom: 1px solid #000;
+      margin-bottom: 3mm;
+    }
+    .summary .line {
+      font-size: 11px;
+      margin: 1mm 0;
+    }
+    .summary .total {
+      font-size: 14px;
+      font-weight: 900;
+      margin-top: 2mm;
+    }
+    .coupon {
+      padding: 3mm 1mm;
+      margin-bottom: 2mm;
+      page-break-inside: avoid;
+    }
+    .coupon-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #666;
+      margin-bottom: 2mm;
+    }
+    .qr-container {
+      text-align: center;
+      padding: 2mm 0;
+    }
+    .qr-img {
+      width: 40mm;
+      height: 40mm;
+      image-rendering: pixelated;
+    }
+    .coupon .code {
+      font-size: 13px;
+      font-weight: 900;
+      text-align: center;
+      letter-spacing: 1.5px;
+      padding: 2mm 0 1mm;
+      border: 1px dashed #999;
+      border-radius: 2mm;
+      margin: 1mm 2mm;
+      background: #f9f9f9;
+    }
+    .coupon .value {
+      text-align: center;
+      font-size: 14px;
+      font-weight: 900;
+      margin-top: 1mm;
+    }
+    .scan-hint {
+      text-align: center;
+      font-size: 8px;
+      color: #888;
+      margin-top: 1mm;
+      font-style: italic;
+    }
+    .coupon .sep {
+      text-align: center;
+      font-size: 10px;
+      color: #999;
+      margin-top: 2mm;
+    }
+    .footer {
+      text-align: center;
+      padding: 3mm 0;
+      border-top: 2px dashed #000;
+      margin-top: 2mm;
+      font-size: 9px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>CASHBOX PIX</h1>
+    <div class="info">LOTE DE CUPONS</div>
+    <div class="info">${batch.sponsorName}</div>
+    <div class="batch-id">Lote: ${batch.id}</div>
+    <div class="batch-id">${dateStr}</div>
+  </div>
+  <div class="summary">
+    <div class="line">Quantidade: ${batch.quantity} cupons</div>
+    <div class="line">Valor unitario: R$ ${batch.value.toFixed(2)}</div>
+    <div class="line">Prefixo: ${batch.prefix}</div>
+    <div class="total">Total: R$ ${(batch.quantity * batch.value).toFixed(2)}</div>
+  </div>
+  ${codesHTML}
+  <div class="footer">
+    <div>*** FIM DO LOTE ***</div>
+    <div style="margin-top:1mm;">Impresso em ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+  </div>
+</body>
+</html>`;
+}
+
+function CouponBatchModal({
+  visible,
+  onClose,
+  sponsors,
+  onGenerate,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  sponsors: Sponsor[];
+  onGenerate: (batch: CouponBatch) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [selectedSponsor, setSelectedSponsor] = useState<string>('');
+  const [quantity, setQuantity] = useState<string>('10');
+  const [value, setValue] = useState<string>('10');
+  const [prefix, setPrefix] = useState<string>('CBX');
+  const [showSponsorPicker, setShowSponsorPicker] = useState<boolean>(false);
+
+  const selectedSponsorObj = sponsors.find((s) => s.id === selectedSponsor);
+
+  const handleGenerate = useCallback(() => {
+    if (!selectedSponsor) {
+      Alert.alert('Erro', 'Selecione um patrocinador');
+      return;
+    }
+    const qty = parseInt(quantity, 10);
+    if (!qty || qty < 1 || qty > 1000) {
+      Alert.alert('Erro', 'Quantidade deve ser entre 1 e 1000');
+      return;
+    }
+    const val = parseFloat(value);
+    if (!val || val <= 0) {
+      Alert.alert('Erro', 'Valor deve ser maior que zero');
+      return;
+    }
+    const codes: string[] = [];
+    for (let i = 0; i < qty; i++) {
+      const code = `${prefix}${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      codes.push(code);
+    }
+    const batch: CouponBatch = {
+      id: `batch_${Date.now()}`,
+      sponsorId: selectedSponsor,
+      sponsorName: selectedSponsorObj?.name ?? '',
+      quantity: qty,
+      value: val,
+      prefix: prefix,
+      createdAt: new Date().toISOString(),
+      codes,
+    };
+    onGenerate(batch);
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert('Sucesso', `${qty} cupons gerados para ${selectedSponsorObj?.name}!\n\nDeseja imprimir os cupons agora?`, [
+      { text: 'Depois', style: 'cancel' },
+      { text: 'Imprimir', onPress: () => printBatchCoupons(batch) },
+    ]);
+    onClose();
+  }, [selectedSponsor, quantity, value, prefix, selectedSponsorObj, onGenerate, onClose]);
+
+  const printBatchCoupons = useCallback(async (batch: CouponBatch) => {
+    try {
+      const html = generateThermalPrintHTML(batch);
+      console.log('[CouponBatch] Printing batch:', batch.id, 'codes:', batch.codes.length);
+      await Print.printAsync({ html });
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.log('[CouponBatch] Print error:', err);
+      Alert.alert('Erro', 'Nao foi possivel imprimir. Verifique se a impressora esta conectada via Bluetooth ou WiFi.');
+    }
+  }, []);
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={fm.container}>
+        <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+          <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+            <X size={22} color={Colors.dark.text} />
+          </TouchableOpacity>
+          <Text style={fm.headerTitle}>Gerar Lote de Cupons</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <ScrollView contentContainerStyle={fm.scroll} keyboardShouldPersistTaps="handled">
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Patrocinador</Text>
+            <TouchableOpacity
+              style={[fm.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }]}
+              onPress={() => setShowSponsorPicker(!showSponsorPicker)}
+            >
+              <Text style={{ color: selectedSponsorObj ? Colors.dark.text : Colors.dark.textMuted, fontSize: 14 }}>
+                {selectedSponsorObj?.name ?? 'Selecione um patrocinador'}
+              </Text>
+              <ChevronDown size={18} color={Colors.dark.textMuted} />
+            </TouchableOpacity>
+            {showSponsorPicker && (
+              <View style={bm.pickerList}>
+                {sponsors.map((sp) => (
+                  <TouchableOpacity
+                    key={sp.id}
+                    style={[bm.pickerItem, selectedSponsor === sp.id && bm.pickerItemActive]}
+                    onPress={() => { setSelectedSponsor(sp.id); setShowSponsorPicker(false); }}
+                  >
+                    <Text style={[bm.pickerItemTxt, selectedSponsor === sp.id && bm.pickerItemTxtActive]}>{sp.name}</Text>
+                    <Text style={bm.pickerItemSub}>{sp.city}, {sp.state}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Configuracoes</Text>
+            <View style={[fm.row, { marginTop: 10 }]}>
+              <View style={[fm.field, { flex: 1 }]}>
+                <Text style={fm.label}>Quantidade</Text>
+                <TextInput style={fm.input} value={quantity} onChangeText={setQuantity} placeholder="10" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+              </View>
+              <View style={[fm.field, { flex: 1 }]}>
+                <Text style={fm.label}>Valor (R$)</Text>
+                <TextInput style={fm.input} value={value} onChangeText={setValue} placeholder="10" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+              </View>
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Prefixo do codigo</Text>
+              <TextInput style={fm.input} value={prefix} onChangeText={setPrefix} placeholder="CBX" placeholderTextColor={Colors.dark.textMuted} autoCapitalize="characters" maxLength={6} />
+            </View>
+          </View>
+          <TouchableOpacity style={fm.saveFullBtn} onPress={handleGenerate} activeOpacity={0.8}>
+            <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={fm.saveFullGrad}>
+              <Package size={18} color="#000" />
+              <Text style={fm.saveFullTxt}>GERAR CUPONS</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const bm = StyleSheet.create({
+  pickerList: { backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, marginTop: 8, overflow: 'hidden' },
+  pickerItem: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
+  pickerItemActive: { backgroundColor: Colors.dark.neonGreenFaint },
+  pickerItemTxt: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const },
+  pickerItemTxtActive: { color: Colors.dark.neonGreen },
+  pickerItemSub: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+});
+
+function NotificationModal({
+  visible,
+  onClose,
+  onSave,
+  initialData,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSave: (notif: AdminNotification) => void;
+  initialData: AdminNotification | null;
+}) {
+  const insets = useSafeAreaInsets();
+  const [title, setTitle] = useState<string>('');
+  const [message, setMessage] = useState<string>('');
+  const [type, setType] = useState<AdminNotification['type']>('general');
+
+  React.useEffect(() => {
+    if (visible && initialData) {
+      setTitle(initialData.title);
+      setMessage(initialData.message);
+      setType(initialData.type);
+    } else if (visible) {
+      setTitle('');
+      setMessage('');
+      setType('general');
+    }
+  }, [visible, initialData]);
+
+  const handleSave = useCallback(() => {
+    if (!title.trim() || !message.trim()) {
+      Alert.alert('Erro', 'Preencha titulo e mensagem');
+      return;
+    }
+    const notif: AdminNotification = {
+      id: initialData?.id ?? `notif_${Date.now()}`,
+      title: title.trim(),
+      message: message.trim(),
+      type,
+      createdAt: initialData?.createdAt ?? new Date().toISOString(),
+      sent: initialData?.sent ?? false,
+    };
+    onSave(notif);
+    onClose();
+  }, [title, message, type, initialData, onSave, onClose]);
+
+  const typeOptions: { value: AdminNotification['type']; label: string }[] = [
+    { value: 'general', label: 'Geral' },
+    { value: 'promo', label: 'Promocao' },
+    { value: 'prize', label: 'Premio' },
+  ];
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={fm.container}>
+        <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+          <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+            <X size={22} color={Colors.dark.text} />
+          </TouchableOpacity>
+          <Text style={fm.headerTitle}>{initialData ? 'Editar Notificacao' : 'Nova Notificacao'}</Text>
+          <TouchableOpacity onPress={handleSave} style={fm.saveHeaderBtn}>
+            <Text style={fm.saveHeaderTxt}>Salvar</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={fm.scroll} keyboardShouldPersistTaps="handled">
+          <View style={fm.section}>
+            <View style={fm.field}>
+              <Text style={fm.label}>Titulo</Text>
+              <TextInput style={fm.input} value={title} onChangeText={setTitle} placeholder="Titulo da notificacao" placeholderTextColor={Colors.dark.textMuted} />
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Mensagem</Text>
+              <TextInput style={[fm.input, fm.textArea]} value={message} onChangeText={setMessage} placeholder="Mensagem da notificacao" placeholderTextColor={Colors.dark.textMuted} multiline numberOfLines={4} />
+            </View>
+            <View style={fm.field}>
+              <Text style={fm.label}>Tipo</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {typeOptions.map((opt) => (
+                  <TouchableOpacity key={opt.value} style={[nm.typeBtn, type === opt.value && nm.typeBtnActive]} onPress={() => setType(opt.value)}>
+                    <Text style={[nm.typeTxt, type === opt.value && nm.typeTxtActive]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity style={fm.saveFullBtn} onPress={handleSave} activeOpacity={0.8}>
+            <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={fm.saveFullGrad}>
+              <Save size={18} color="#000" />
+              <Text style={fm.saveFullTxt}>SALVAR NOTIFICACAO</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const nm = StyleSheet.create({
+  typeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight },
+  typeBtnActive: { backgroundColor: Colors.dark.neonGreen },
+  typeTxt: { color: Colors.dark.textMuted, fontSize: 13, fontWeight: '600' as const },
+  typeTxtActive: { color: '#000' },
+});
+
+export default function AdminPanel() {
+  console.log("[AdminPanel] Rendering admin panel");
+  const insets = useSafeAreaInsets();
+  const {
+    isAdmin,
+    couponBatches,
+    addCouponBatch,
+    notifications,
+    addNotification,
+    updateNotification,
+    deleteNotification,
+    grandPrizeConfig,
+    saveGrandPrize,
+    cityPrizes,
+    saveCityPrize,
+    getCityPrize,
+    cityImages,
+    saveCityImage,
+    getCityImage,
+    seedDatabase,
+    checkTables,
+    getSetupSQL,
+    promoQRCodes,
+    addPromoQR,
+    updatePromoQR,
+    deletePromoQR,
+    getPromoQRsByCity,
+  } = useAdmin();
+  const {
+    sponsors,
+    addSponsor,
+    updateSponsor,
+    deleteSponsor,
+    sponsorsByCity,
+    sponsorsByState,
+  } = useSponsor();
+  const {
+    coupons,
+    validCoupons,
+    usedCoupons,
+    couponsBySponsor,
+  } = useCoupon();
+
+  const [mainTab, setMainTab] = useState<MainTab>('overview');
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
+  const [selectedState, setSelectedState] = useState<string | null>(null);
+  const [citySubTab, setCitySubTab] = useState<CitySubTab>('prize');
+
+  const [showSponsorModal, setShowSponsorModal] = useState<boolean>(false);
+  const [editingSponsor, setEditingSponsor] = useState<Sponsor | null>(null);
+  const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
+  const [showNotifModal, setShowNotifModal] = useState<boolean>(false);
+  const [editingNotif, setEditingNotif] = useState<AdminNotification | null>(null);
+  const [editingPromo, setEditingPromo] = useState<PromotionalQR | null>(null);
+  const [showPromoForm, setShowPromoForm] = useState<boolean>(false);
+  const [promoForm, setPromoForm] = useState<{ sponsorId: string; sponsorName: string; sponsorAddress: string; message: string; couponValue: string; minPurchase: string }>({
+    sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100',
+  });
+
+  const [seeding, setSeeding] = useState<boolean>(false);
+  const [showSQLModal, setShowSQLModal] = useState<boolean>(false);
+  const [couponFilterTab, setCouponFilterTab] = useState<'all' | 'active' | 'used' | 'sponsor'>('all');
+  const [selectedCouponSponsor, setSelectedCouponSponsor] = useState<string>('');
+
+  const cities = useMemo(() => {
+    const cityMap: Record<string, { city: string; state: string; count: number }> = {};
+    sponsors.forEach((s) => {
+      const key = `${s.city}|${s.state}`;
+      if (!cityMap[key]) cityMap[key] = { city: s.city, state: s.state, count: 0 };
+      cityMap[key].count++;
+    });
+    return Object.values(cityMap).sort((a, b) => a.city.localeCompare(b.city));
+  }, [sponsors]);
+
+  const states = useMemo(() => {
+    const stateMap: Record<string, { state: string; cities: string[]; count: number }> = {};
+    sponsors.forEach((s) => {
+      if (!stateMap[s.state]) stateMap[s.state] = { state: s.state, cities: [], count: 0 };
+      if (!stateMap[s.state].cities.includes(s.city)) stateMap[s.state].cities.push(s.city);
+      stateMap[s.state].count++;
+    });
+    return Object.values(stateMap).sort((a, b) => a.state.localeCompare(b.state));
+  }, [sponsors]);
+
+  const citySponsors = useMemo(() => {
+    if (!selectedCity) return [];
+    return sponsors.filter((s) => s.city === selectedCity);
+  }, [sponsors, selectedCity]);
+
+  const stateSponsors = useMemo(() => {
+    if (!selectedState) return [];
+    return sponsors.filter((s) => s.state === selectedState);
+  }, [sponsors, selectedState]);
+
+  const totalOffers = useMemo(() => sponsors.reduce((sum, s) => sum + s.offers.length, 0), [sponsors]);
+
+  const cityPrizeData = useMemo(() => {
+    if (!selectedCity) return null;
+    return getCityPrize(selectedCity);
+  }, [selectedCity, getCityPrize]);
+
+  const [prizeMsg, setPrizeMsg] = useState<string>('');
+  const [prizeVal, setPrizeVal] = useState<string>('');
+  const [prizeDrawDate, setPrizeDrawDate] = useState<string>('');
+  const [prizeBgUrl, setPrizeBgUrl] = useState<string>('');
+  const [prizeLotteryRef, setPrizeLotteryRef] = useState<string>('');
+
+  React.useEffect(() => {
+    if (selectedCity) {
+      const cp = getCityPrize(selectedCity);
+      const exactMatch = grandPrizeConfig?.city === selectedCity ? grandPrizeConfig : null;
+      const fallback = exactMatch ?? grandPrizeConfig;
+      const prize = cp ?? fallback;
+      console.log('[Admin] Loading prize for city:', selectedCity, 'local:', !!cp, 'supabase fallback:', !!fallback, 'bgUrl:', prize?.backgroundImageUrl);
+      setPrizeMsg(prize?.description ?? '');
+      setPrizeVal(prize?.value?.toString() ?? '10000');
+      setPrizeDrawDate(prize?.drawDate ?? '2026-05-15');
+      setPrizeBgUrl(prize?.backgroundImageUrl ?? '');
+      setPrizeLotteryRef(prize?.lotteryReference ?? 'Loteria Federal');
+    }
+  }, [selectedCity, getCityPrize, grandPrizeConfig]);
+
+  const sponsorFormData = useMemo((): SponsorFormData => {
+    if (editingSponsor) {
+      return {
+        name: editingSponsor.name,
+        category: editingSponsor.category,
+        imageUrl: editingSponsor.imageUrl,
+        logoUrl: editingSponsor.logoUrl,
+        address: editingSponsor.address,
+        city: editingSponsor.city,
+        state: editingSponsor.state,
+        phone: editingSponsor.phone,
+        description: editingSponsor.description,
+        minPurchaseValue: editingSponsor.minPurchaseValue.toString(),
+        couponValue: (editingSponsor.couponValue ?? 0).toString(),
+        verified: editingSponsor.verified,
+        latitude: editingSponsor.latitude.toString(),
+        longitude: editingSponsor.longitude.toString(),
+        galleryImages: editingSponsor.galleryImages ?? [],
+        offers: (editingSponsor.offers ?? []).map((o) => ({
+          id: o.id,
+          title: o.title,
+          description: o.description,
+          imageUrl: o.imageUrl,
+          discount: o.discount,
+        })),
+      };
+    }
+    return {
+      ...emptySponsorForm,
+      city: selectedCity ?? 'Sao Paulo',
+      state: cities.find((c) => c.city === selectedCity)?.state ?? 'SP',
+    };
+  }, [editingSponsor, selectedCity, cities]);
+
+  const handleOpenAdd = useCallback(() => {
+    setEditingSponsor(null);
+    setShowSponsorModal(true);
+  }, []);
+
+  const handleOpenEdit = useCallback((sponsor: Sponsor) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEditingSponsor(sponsor);
+    setShowSponsorModal(true);
+  }, []);
+
+  const handleSaveSponsor = useCallback((data: SponsorFormData) => {
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const sponsorData: Sponsor = {
+      id: editingSponsor?.id ?? `s_${Date.now()}`,
+      name: data.name.trim(),
+      category: data.category.trim(),
+      imageUrl: data.imageUrl.trim() || 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=400',
+      logoUrl: data.logoUrl.trim() || 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=100',
+      address: data.address.trim(),
+      city: data.city.trim(),
+      state: data.state.trim(),
+      latitude: parseFloat(data.latitude) || -23.5505,
+      longitude: parseFloat(data.longitude) || -46.6333,
+      phone: data.phone.trim(),
+      description: data.description.trim(),
+      minPurchaseValue: parseFloat(data.minPurchaseValue) || 50,
+      verified: data.verified,
+      couponValue: parseFloat(data.couponValue) || 0,
+      offers: data.offers.map((o) => ({
+        id: o.id,
+        sponsorId: editingSponsor?.id ?? `s_${Date.now()}`,
+        sponsorName: data.name.trim(),
+        title: o.title,
+        description: o.description,
+        imageUrl: o.imageUrl || 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400',
+        discount: o.discount,
+        likes: editingSponsor?.offers?.find((eo) => eo.id === o.id)?.likes ?? 0,
+        comments: editingSponsor?.offers?.find((eo) => eo.id === o.id)?.comments ?? 0,
+        shares: editingSponsor?.offers?.find((eo) => eo.id === o.id)?.shares ?? 0,
+      })),
+      stories: editingSponsor?.stories ?? [],
+      galleryImages: data.galleryImages,
+    };
+    if (editingSponsor) {
+      updateSponsor(sponsorData);
+      Alert.alert('Sucesso', `${sponsorData.name} atualizado!`);
+    } else {
+      addSponsor(sponsorData);
+      Alert.alert('Sucesso', `${sponsorData.name} adicionado!`);
+    }
+    setShowSponsorModal(false);
+    setEditingSponsor(null);
+  }, [editingSponsor, updateSponsor, addSponsor]);
+
+  const handleDeleteSponsor = useCallback((sponsor: Sponsor) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert('Excluir Patrocinador', `Tem certeza que deseja excluir "${sponsor.name}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => deleteSponsor(sponsor.id) },
+    ]);
+  }, [deleteSponsor]);
+
+  const handlePrintBatch = useCallback(async (batch: CouponBatch) => {
+    try {
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      console.log('[Admin] Printing batch:', batch.id, 'with', batch.codes.length, 'codes');
+      const html = generateThermalPrintHTML(batch);
+      await Print.printAsync({ html });
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.log('[Admin] Print error:', err);
+      Alert.alert('Erro ao Imprimir', 'Nao foi possivel imprimir. Verifique se a impressora termica esta conectada via Bluetooth ou WiFi.');
+    }
+  }, []);
+
+  const handlePickCityPhoto = useCallback(async (city: string) => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      saveCityImage(city, result.assets[0].uri);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      console.log('[Admin] City photo saved for:', city);
+    }
+  }, [saveCityImage]);
+
+  const handlePickPrizeBg = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setPrizeBgUrl(result.assets[0].uri);
+    }
+  }, []);
+
+  const handleSaveCityPrize = useCallback(() => {
+    if (!selectedCity) return;
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const prize: GrandPrize = {
+      id: cityPrizeData?.id ?? `gp_${selectedCity}_${Date.now()}`,
+      title: `GRANDE PREMIO - ${selectedCity}`,
+      value: parseFloat(prizeVal) || 10000,
+      imageUrl: cityPrizeData?.imageUrl ?? mockGrandPrize.imageUrl,
+      backgroundImageUrl: prizeBgUrl.trim() || undefined,
+      drawDate: prizeDrawDate || '2026-05-15',
+      lotteryReference: prizeLotteryRef || 'Loteria Federal',
+      description: prizeMsg || `Grande premio da cidade de ${selectedCity}`,
+      isActive: true,
+      city: selectedCity,
+      state: cities.find((c) => c.city === selectedCity)?.state,
+    };
+    saveCityPrize(selectedCity, prize);
+    Alert.alert('Sucesso', `Premio de ${selectedCity} salvo!`);
+  }, [selectedCity, prizeVal, prizeDrawDate, prizeBgUrl, prizeLotteryRef, prizeMsg, cityPrizeData, cities, saveCityPrize]);
+
+  const handleSendNotification = useCallback((notif: AdminNotification) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert('Enviar Notificacao', `Enviar "${notif.title}" para todos os usuarios?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Enviar', onPress: () => { updateNotification({ ...notif, sent: true }); Alert.alert('Enviado', 'Notificacao enviada!'); } },
+    ]);
+  }, [updateNotification]);
+
+  if (!isAdmin) {
+    return (
+      <View style={a.denied}>
+        <Shield size={64} color={Colors.dark.textMuted} />
+        <Text style={a.deniedTtl}>Acesso Restrito</Text>
+        <Text style={a.deniedSub}>Esta area e exclusiva para administradores.</Text>
+      </View>
+    );
+  }
+
+  const renderOverview = () => (
+    <>
+      <View style={a.statsRow}>
+        <StatCard icon={Globe} label="Estados" value={states.length.toString()} color={Colors.dark.purple} />
+        <StatCard icon={Building2} label="Cidades" value={cities.length.toString()} color={Colors.dark.orange} />
+        <StatCard icon={Store} label="Lojas" value={sponsors.length.toString()} color={Colors.dark.neonGreen} />
+      </View>
+      <View style={a.statsRow}>
+        <StatCard icon={Gift} label="Ofertas" value={totalOffers.toString()} color={Colors.dark.gold} />
+        <StatCard icon={Ticket} label="Cupons" value={coupons.length.toString()} color={Colors.dark.warning} />
+        <StatCard icon={Trophy} label="Premios" value={Object.keys(cityPrizes).length.toString()} color={Colors.dark.danger} />
+      </View>
+
+      <View style={a.section}>
+        <View style={a.secHdr}>
+          <BarChart3 size={18} color={Colors.dark.neonGreen} />
+          <Text style={a.secTtl}>Resumo Geral</Text>
+        </View>
+        <View style={a.summaryGrid}>
+          <View style={a.summaryItem}>
+            <Text style={a.summaryVal}>{validCoupons.length}</Text>
+            <Text style={a.summaryLbl}>Cupons Ativos</Text>
+          </View>
+          <View style={a.summaryItem}>
+            <Text style={a.summaryVal}>{usedCoupons.length}</Text>
+            <Text style={a.summaryLbl}>Cupons Usados</Text>
+          </View>
+          <View style={a.summaryItem}>
+            <Text style={a.summaryVal}>{couponBatches.length}</Text>
+            <Text style={a.summaryLbl}>Lotes Gerados</Text>
+          </View>
+          <View style={a.summaryItem}>
+            <Text style={a.summaryVal}>{notifications.length}</Text>
+            <Text style={a.summaryLbl}>Notificacoes</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={a.section}>
+        <View style={a.secHdr}>
+          <Bell size={18} color={Colors.dark.warning} />
+          <Text style={a.secTtl}>Acoes Rapidas</Text>
+        </View>
+        <TouchableOpacity style={a.actionRow} onPress={() => setMainTab('states')} activeOpacity={0.7}>
+          <View style={[a.actIcon, { backgroundColor: 'rgba(124,58,237,0.1)' }]}>
+            <Globe size={18} color={Colors.dark.purple} />
+          </View>
+          <View style={a.actInfo}>
+            <Text style={a.actTtl}>Ver Estados</Text>
+            <Text style={a.actSub}>{states.length} estados com patrocinadores</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.dark.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity style={a.actionRow} onPress={() => setMainTab('cities')} activeOpacity={0.7}>
+          <View style={[a.actIcon, { backgroundColor: 'rgba(255,107,0,0.1)' }]}>
+            <Building2 size={18} color={Colors.dark.orange} />
+          </View>
+          <View style={a.actInfo}>
+            <Text style={a.actTtl}>Ver Cidades</Text>
+            <Text style={a.actSub}>{cities.length} cidades cadastradas</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.dark.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity style={a.actionRow} onPress={() => setShowBatchModal(true)} activeOpacity={0.7}>
+          <View style={[a.actIcon, { backgroundColor: Colors.dark.neonGreenFaint }]}>
+            <Package size={18} color={Colors.dark.neonGreen} />
+          </View>
+          <View style={a.actInfo}>
+            <Text style={a.actTtl}>Gerar Lote de Cupons</Text>
+            <Text style={a.actSub}>Criar cupons para patrocinador</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.dark.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity style={a.actionRow} onPress={() => { setEditingNotif(null); setShowNotifModal(true); }} activeOpacity={0.7}>
+          <View style={[a.actIcon, { backgroundColor: 'rgba(255,190,11,0.1)' }]}>
+            <Bell size={18} color={Colors.dark.warning} />
+          </View>
+          <View style={a.actInfo}>
+            <Text style={a.actTtl}>Nova Notificacao</Text>
+            <Text style={a.actSub}>Criar e enviar notificacao</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.dark.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={a.actionRow}
+          onPress={() => {
+            Alert.alert('Sincronizar Dados', 'Enviar todos os dados locais para o Supabase?', [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Sincronizar',
+                onPress: async () => {
+                  try {
+                    const result = await seedDatabase();
+                    const allOk = result.sponsors.count > 0 && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
+                    const anyTableMissing = hasTableMissingError(result.sponsors.error) || hasTableMissingError(result.winners.error) || hasTableMissingError(result.leaderboard.error) || hasTableMissingError(result.grandPrize.error);
+                    const anyConfigError = hasConfigError(result.sponsors.error) || hasConfigError(result.winners.error);
+
+                    if (anyConfigError) {
+                      Alert.alert('Supabase Nao Configurado', 'As variaveis de ambiente do Supabase nao estao configuradas. Verifique EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY.');
+                    } else if (anyTableMissing) {
+                      Alert.alert(
+                        'Tabelas nao encontradas',
+                        'As tabelas do banco nao existem. Execute o SQL de setup no Supabase.',
+                        [
+                          { text: 'OK', style: 'cancel' },
+                          { text: 'Ver SQL', onPress: () => setShowSQLModal(true) },
+                        ],
+                      );
+                    } else {
+                      Alert.alert(
+                        allOk ? 'Sucesso' : 'Sincronizacao com Erros',
+                        `Patrocinadores: ${result.sponsors.count > 0 ? result.sponsors.count + ' OK' : (result.sponsors.error ?? 'Falhou')}\nGanhadores: ${result.winners.ok ? 'OK' : (result.winners.error ?? 'Erro')}\nLeaderboard: ${result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Erro')}\nPremio: ${result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Erro')}`,
+                      );
+                    }
+                  } catch (err) {
+                    Alert.alert('Erro', 'Falha ao sincronizar dados');
+                  }
+                },
+              },
+            ]);
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={[a.actIcon, { backgroundColor: 'rgba(0,184,101,0.1)' }]}>
+            <Database size={18} color={Colors.dark.neonGreen} />
+          </View>
+          <View style={a.actInfo}>
+            <Text style={a.actTtl}>Sincronizar com Supabase</Text>
+            <Text style={a.actSub}>Enviar dados para o banco de dados</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.dark.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
+        style={a.seedBtn}
+        activeOpacity={0.8}
+        disabled={seeding}
+        testID="seed-database-btn"
+        onPress={() => {
+            Alert.alert(
+              'Seed Database',
+              'Isso vai popular o Supabase com todos os dados de exemplo (patrocinadores, ofertas, ganhadores, leaderboard e premio).\n\nDeseja continuar?',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Seed',
+                  onPress: async () => {
+                    setSeeding(true);
+                    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    try {
+                      console.log('[ADMIN] Starting database seed...');
+                      const result = await seedDatabase();
+                      console.log('[ADMIN] Seed result:', result);
+
+                      const anyTableMissing = hasTableMissingError(result.sponsors.error) || hasTableMissingError(result.winners.error) || hasTableMissingError(result.leaderboard.error) || hasTableMissingError(result.grandPrize.error);
+                      const anyConfigError = hasConfigError(result.sponsors.error) || hasConfigError(result.winners.error);
+
+                      if (anyConfigError) {
+                        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                        Alert.alert(
+                          'Supabase Nao Configurado',
+                          'As variaveis de ambiente do Supabase nao estao configuradas.\n\nVerifique se EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY estao definidas no painel do projeto.',
+                        );
+                      } else if (anyTableMissing) {
+                        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                        Alert.alert(
+                          'Tabelas nao encontradas!',
+                          'As tabelas do banco de dados nao existem no Supabase. Execute o SQL de setup primeiro.',
+                          [
+                            { text: 'Cancelar', style: 'cancel' },
+                            { text: 'Ver SQL', onPress: () => setShowSQLModal(true) },
+                          ],
+                        );
+                      } else {
+                        const sponsorStatus = result.sponsors.count > 0 ? `${result.sponsors.count} OK` : (result.sponsors.error ?? 'Falhou');
+                        const winnersStatus = result.winners.ok ? 'OK' : (result.winners.error ?? 'Falhou');
+                        const leaderboardStatus = result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Falhou');
+                        const prizeStatus = result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Falhou');
+                        const allOk = result.sponsors.count > 0 && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
+
+                        if (Platform.OS !== 'web') {
+                          Haptics.notificationAsync(allOk ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+                        }
+                        Alert.alert(
+                          allOk ? 'Seed Concluido!' : 'Seed com Erros',
+                          `Patrocinadores: ${sponsorStatus}\nGanhadores: ${winnersStatus}\nLeaderboard: ${leaderboardStatus}\nPremio: ${prizeStatus}`,
+                        );
+                      }
+                    } catch (err: any) {
+                      console.log('[ADMIN] Seed error:', err);
+                      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                      Alert.alert('Erro', `Falha ao executar seed: ${err?.message ?? 'Erro desconhecido'}`);
+                    } finally {
+                      setSeeding(false);
+                    }
+                  },
+                },
+              ],
+            );
+          }}
+        >
+          <LinearGradient
+            colors={seeding ? ['#555', '#444'] : ['#10B981', '#059669']}
+            style={a.seedBtnGrad}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Sprout size={20} color="#fff" />
+            <Text style={a.seedBtnTxt}>{seeding ? 'Populando banco...' : 'SEED DATABASE'}</Text>
+            <Text style={a.seedBtnSub}>Popular Supabase com dados de exemplo</Text>
+          </LinearGradient>
+      </TouchableOpacity>
+
+      <Modal visible={showSQLModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSQLModal(false)}>
+        <View style={{ flex: 1, backgroundColor: Colors.dark.background }}>
+          <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+            <TouchableOpacity onPress={() => setShowSQLModal(false)} style={fm.closeBtn}>
+              <X size={22} color={Colors.dark.text} />
+            </TouchableOpacity>
+            <Text style={fm.headerTitle}>SQL Setup</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  await Clipboard.setStringAsync(getSetupSQL());
+                  if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  Alert.alert('Copiado!', 'SQL copiado para a area de transferencia. Cole no Supabase SQL Editor.');
+                } catch {
+                  Alert.alert('Erro', 'Nao foi possivel copiar');
+                }
+              }}
+              style={fm.saveHeaderBtn}
+            >
+              <Text style={fm.saveHeaderTxt}>Copiar</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <View style={{ backgroundColor: Colors.dark.card, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <AlertTriangle size={18} color="#F59E0B" />
+                <Text style={{ color: '#FFBE0B', fontSize: 14, fontWeight: '700' as const }}>Instrucoes</Text>
+              </View>
+              <Text style={{ color: Colors.dark.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 16 }}>
+                1. Abra o Supabase Dashboard{"\n"}
+                2. Va em SQL Editor{"\n"}
+                3. Cole o SQL abaixo e execute{"\n"}
+                4. Volte aqui e clique em SEED DATABASE novamente
+              </Text>
+              <View style={{ backgroundColor: Colors.dark.surfaceLight, borderRadius: 8, padding: 12 }}>
+                <Text style={{ color: Colors.dark.text, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }} selectable>
+                  {getSetupSQL()}
+                </Text>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+    </>
+  );
+
+  const renderStates = () => {
+    if (selectedState) {
+      const stateData = states.find((s) => s.state === selectedState);
+      const stateCities = stateData?.cities ?? [];
+      return (
+        <>
+          <TouchableOpacity style={a.backBtn} onPress={() => setSelectedState(null)} activeOpacity={0.7}>
+            <ChevronLeft size={20} color={Colors.dark.neonGreen} />
+            <Text style={a.backBtnTxt}>Todos os Estados</Text>
+          </TouchableOpacity>
+
+          <View style={a.cityHeaderCard}>
+            <LinearGradient colors={[Colors.dark.purple, '#5B21B6']} style={a.cityHeaderGrad}>
+              <Globe size={28} color="#fff" />
+              <Text style={a.cityHeaderName}>{selectedState}</Text>
+              <Text style={a.cityHeaderSub}>{stateSponsors.length} patrocinadores • {stateCities.length} cidades</Text>
+            </LinearGradient>
+          </View>
+
+          <View style={a.section}>
+            <View style={a.secHdr}>
+              <Building2 size={18} color={Colors.dark.orange} />
+              <Text style={a.secTtl}>Cidades em {selectedState}</Text>
+            </View>
+            {stateCities.map((city) => {
+              const cityCount = sponsors.filter((s) => s.city === city && s.state === selectedState).length;
+              const hasPrize = !!cityPrizes[city];
+              return (
+                <TouchableOpacity
+                  key={city}
+                  style={a.cityRow}
+                  onPress={() => { setSelectedCity(city); setSelectedState(null); setMainTab('cities'); setCitySubTab('prize'); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={a.cityRowIcon}>
+                    <MapPin size={16} color={Colors.dark.orange} />
+                  </View>
+                  <View style={a.cityRowInfo}>
+                    <Text style={a.cityRowName}>{city}</Text>
+                    <Text style={a.cityRowMeta}>{cityCount} patrocinadores</Text>
+                  </View>
+                  {hasPrize && (
+                    <View style={a.cityPrizeBadge}>
+                      <Trophy size={10} color="#000" />
+                    </View>
+                  )}
+                  <View style={a.cityRowCount}>
+                    <Text style={a.cityRowCountTxt}>{cityCount}</Text>
+                  </View>
+                  <ChevronRight size={16} color={Colors.dark.textMuted} />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={a.section}>
+            <View style={a.secHdr}>
+              <Store size={18} color={Colors.dark.neonGreen} />
+              <Text style={a.secTtl}>Patrocinadores em {selectedState}</Text>
+            </View>
+            {stateSponsors.map((sp) => (
+              <SponsorRow key={sp.id} sponsor={sp} onEdit={() => handleOpenEdit(sp)} onDelete={() => handleDeleteSponsor(sp)} />
+            ))}
+          </View>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <View style={a.section}>
+          <View style={a.secHdr}>
+            <Globe size={18} color={Colors.dark.purple} />
+            <Text style={a.secTtl}>Estados ({states.length})</Text>
+          </View>
+          {states.length === 0 ? (
+            <View style={a.emptyState}>
+              <Globe size={32} color={Colors.dark.textMuted} />
+              <Text style={a.emptyTxt}>Nenhum estado com patrocinadores</Text>
+            </View>
+          ) : (
+            states.map((st) => (
+              <TouchableOpacity
+                key={st.state}
+                style={a.stateRow}
+                onPress={() => setSelectedState(st.state)}
+                activeOpacity={0.7}
+              >
+                <View style={a.stateIcon}>
+                  <Map size={20} color="#fff" />
+                </View>
+                <View style={a.stateInfo}>
+                  <Text style={a.stateName}>{st.state}</Text>
+                  <Text style={a.stateMeta}>{st.cities.length} cidades • {st.count} patrocinadores</Text>
+                </View>
+                <View style={a.stateCountBadge}>
+                  <Text style={a.stateCountTxt}>{st.count}</Text>
+                </View>
+                <ChevronRight size={18} color={Colors.dark.textMuted} />
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      </>
+    );
+  };
+
+  const renderCityPanel = () => {
+    if (!selectedCity) {
+      return (
+        <>
+          <View style={a.section}>
+            <View style={a.secHdr}>
+              <Building2 size={18} color={Colors.dark.orange} />
+              <Text style={a.secTtl}>Cidades ({cities.length})</Text>
+            </View>
+            {cities.length === 0 ? (
+              <View style={a.emptyState}>
+                <Building2 size={32} color={Colors.dark.textMuted} />
+                <Text style={a.emptyTxt}>Nenhuma cidade com patrocinadores</Text>
+              </View>
+            ) : (
+              cities.map((ct) => {
+                const hasPrize = !!cityPrizes[ct.city];
+                return (
+                  <TouchableOpacity
+                    key={`${ct.city}|${ct.state}`}
+                    style={a.cityRow}
+                    onPress={() => { setSelectedCity(ct.city); setCitySubTab('prize'); }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={a.cityRowIcon}>
+                      <MapPin size={16} color={Colors.dark.orange} />
+                    </View>
+                    <View style={a.cityRowInfo}>
+                      <Text style={a.cityRowName}>{ct.city}</Text>
+                      <Text style={a.cityRowMeta}>{ct.state} • {ct.count} patrocinadores</Text>
+                    </View>
+                    {hasPrize && (
+                      <View style={a.cityPrizeBadge}>
+                        <Trophy size={10} color="#000" />
+                      </View>
+                    )}
+                    <View style={a.cityRowCount}>
+                      <Text style={a.cityRowCountTxt}>{ct.count}</Text>
+                    </View>
+                    <ChevronRight size={16} color={Colors.dark.textMuted} />
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </View>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <TouchableOpacity style={a.backBtn} onPress={() => setSelectedCity(null)} activeOpacity={0.7}>
+          <ChevronLeft size={20} color={Colors.dark.neonGreen} />
+          <Text style={a.backBtnTxt}>Todas as Cidades</Text>
+        </TouchableOpacity>
+
+        <View style={a.cityHeaderCard}>
+          {cityImages[selectedCity ?? ''] ? (
+            <View style={a.cityHeaderImgWrap}>
+              <Image source={{ uri: cityImages[selectedCity ?? ''] }} style={a.cityHeaderBgImg} contentFit="cover" />
+              <View style={a.cityHeaderImgOverlay}>
+                <MapPin size={28} color="#fff" />
+                <Text style={a.cityHeaderName}>{selectedCity}</Text>
+                <Text style={a.cityHeaderSub}>{citySponsors.length} patrocinadores • {cities.find((c) => c.city === selectedCity)?.state ?? ''}</Text>
+                <TouchableOpacity style={a.cityPhotoBtn} onPress={() => handlePickCityPhoto(selectedCity!)} activeOpacity={0.7}>
+                  <ImageIcon size={14} color="#fff" />
+                  <Text style={a.cityPhotoBtnTxt}>Trocar Foto</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <LinearGradient colors={[Colors.dark.orange, Colors.dark.orangeDim]} style={a.cityHeaderGrad}>
+              <MapPin size={28} color="#fff" />
+              <Text style={a.cityHeaderName}>{selectedCity}</Text>
+              <Text style={a.cityHeaderSub}>{citySponsors.length} patrocinadores • {cities.find((c) => c.city === selectedCity)?.state ?? ''}</Text>
+              <TouchableOpacity style={a.cityPhotoBtn} onPress={() => handlePickCityPhoto(selectedCity!)} activeOpacity={0.7}>
+                <ImageIcon size={14} color="#fff" />
+                <Text style={a.cityPhotoBtnTxt}>Adicionar Foto da Cidade</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          )}
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={a.tabBar} contentContainerStyle={a.tabBarContent}>
+          <TabButton label="Premio" active={citySubTab === 'prize'} onPress={() => setCitySubTab('prize')} icon={Trophy} />
+          <TabButton label="Lojas" active={citySubTab === 'sponsors'} onPress={() => setCitySubTab('sponsors')} icon={Store} />
+          <TabButton label="Cupons" active={citySubTab === 'coupons'} onPress={() => setCitySubTab('coupons')} icon={Ticket} />
+          <TabButton label="QR Promo" active={citySubTab === 'promoqr'} onPress={() => setCitySubTab('promoqr')} icon={Gift} />
+          <TabButton label="Notificacoes" active={citySubTab === 'notifications'} onPress={() => setCitySubTab('notifications')} icon={Bell} />
+        </ScrollView>
+
+        {citySubTab === 'prize' && renderCityPrize()}
+        {citySubTab === 'sponsors' && renderCitySponsors()}
+        {citySubTab === 'coupons' && renderCityCoupons()}
+        {citySubTab === 'promoqr' && renderCityPromoQR()}
+        {citySubTab === 'notifications' && renderCityNotifications()}
+      </>
+    );
+  };
+
+  const renderCityPrize = () => (
+    <View style={a.section}>
+      <View style={a.secHdr}>
+        <Trophy size={18} color={Colors.dark.gold} />
+        <Text style={a.secTtl}>Premio - {selectedCity}</Text>
+      </View>
+
+      <View style={a.field}>
+        <Text style={a.fLbl}>Foto de Fundo</Text>
+        <TouchableOpacity style={a.pickImgBtn} onPress={handlePickPrizeBg} activeOpacity={0.8}>
+          <ImageIcon size={18} color={Colors.dark.neonGreen} />
+          <Text style={a.pickImgTxt}>{prizeBgUrl ? 'Trocar Foto da Galeria' : 'Escolher Foto da Galeria'}</Text>
+        </TouchableOpacity>
+      </View>
+      {prizeBgUrl ? (
+        <View style={a.prizePreview}>
+          <Image source={{ uri: prizeBgUrl }} style={a.prizePreviewImg} contentFit="cover" />
+          <View style={a.prizePreviewOverlay}>
+            <Text style={a.prizePreviewTxt}>Preview do Fundo</Text>
+            <TouchableOpacity style={a.changeBgBtn} onPress={handlePickPrizeBg} activeOpacity={0.7}>
+              <ImageIcon size={14} color="#fff" />
+              <Text style={a.changeBgTxt}>Trocar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={a.field}>
+        <Text style={a.fLbl}>Data do Sorteio</Text>
+        <TextInput style={a.inp} value={prizeDrawDate} onChangeText={setPrizeDrawDate} placeholder="2026-05-15" placeholderTextColor={Colors.dark.textMuted} />
+        <Text style={a.fieldHint}>Formato: AAAA-MM-DD (ex: 2026-05-15)</Text>
+      </View>
+
+      <View style={a.field}>
+        <Text style={a.fLbl}>Valor do Premio (R$)</Text>
+        <TextInput style={a.inp} value={prizeVal} onChangeText={setPrizeVal} placeholder="10000" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+      </View>
+
+      <View style={a.field}>
+        <Text style={a.fLbl}>Referencia da Loteria</Text>
+        <TextInput style={a.inp} value={prizeLotteryRef} onChangeText={setPrizeLotteryRef} placeholder="Loteria Federal - 1 ao 5 premio" placeholderTextColor={Colors.dark.textMuted} />
+      </View>
+
+      <View style={a.field}>
+        <Text style={a.fLbl}>Descricao do Premio</Text>
+        <TextInput style={[a.inp, { minHeight: 80, textAlignVertical: 'top' as const }]} value={prizeMsg} onChangeText={setPrizeMsg} placeholder="Descricao do grande premio..." placeholderTextColor={Colors.dark.textMuted} multiline />
+      </View>
+
+      <TouchableOpacity style={a.saveBtn} onPress={handleSaveCityPrize} activeOpacity={0.8}>
+        <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={a.saveBtnG}>
+          <Save size={16} color="#000" />
+          <Text style={a.saveBtnT}>SALVAR PREMIO DE {selectedCity?.toUpperCase()}</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderCitySponsors = () => (
+    <View style={a.section}>
+      <View style={a.secHdr}>
+        <Store size={18} color={Colors.dark.neonGreen} />
+        <Text style={a.secTtl}>Lojas em {selectedCity} ({citySponsors.length})</Text>
+      </View>
+      {citySponsors.length === 0 ? (
+        <View style={a.emptyState}>
+          <Store size={32} color={Colors.dark.textMuted} />
+          <Text style={a.emptyTxt}>Nenhum patrocinador nesta cidade</Text>
+        </View>
+      ) : (
+        citySponsors.map((sp) => (
+          <SponsorRow key={sp.id} sponsor={sp} onEdit={() => handleOpenEdit(sp)} onDelete={() => handleDeleteSponsor(sp)} />
+        ))
+      )}
+      <TouchableOpacity style={a.addBtn} activeOpacity={0.8} onPress={handleOpenAdd} testID="add-sponsor-btn">
+        <Plus size={16} color={Colors.dark.neonGreen} />
+        <Text style={a.addBtnTxt}>Adicionar Patrocinador em {selectedCity}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderCityCoupons = () => {
+    const citySponsorIds = citySponsors.map((s) => s.id);
+    const cityCoupons = coupons.filter((c) => citySponsorIds.includes(c.sponsorId));
+    const cityValid = cityCoupons.filter((c) => c.status === 'valid');
+    const cityUsed = cityCoupons.filter((c) => c.status === 'used');
+
+    const couponTabs: { key: typeof couponFilterTab; label: string }[] = [
+      { key: 'all', label: `Todos (${cityCoupons.length})` },
+      { key: 'active', label: `Ativos (${cityValid.length})` },
+      { key: 'used', label: `Usados (${cityUsed.length})` },
+      { key: 'sponsor', label: 'Por Loja' },
+    ];
+
+    const filteredCoupons = (() => {
+      switch (couponFilterTab) {
+        case 'active': return cityValid;
+        case 'used': return cityUsed;
+        case 'sponsor':
+          if (selectedCouponSponsor) return couponsBySponsor[selectedCouponSponsor] ?? [];
+          return cityCoupons;
+        default: return cityCoupons;
+      }
+    })();
+
+    return (
+      <>
+        <View style={a.section}>
+          <View style={a.secHdr}>
+            <Ticket size={18} color={Colors.dark.neonGreen} />
+            <Text style={a.secTtl}>Cupons - {selectedCity}</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={a.filterScroll} contentContainerStyle={a.filterScrollContent}>
+            {couponTabs.map((tab) => (
+              <TouchableOpacity key={tab.key} style={[a.filterChip, couponFilterTab === tab.key && a.filterChipActive]} onPress={() => setCouponFilterTab(tab.key)}>
+                <Text style={[a.filterChipTxt, couponFilterTab === tab.key && a.filterChipTxtActive]}>{tab.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {couponFilterTab === 'sponsor' && (
+            <View style={a.sponsorFilterSection}>
+              <Text style={a.fLbl}>Selecione a Loja</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
+                {citySponsors.map((sp) => (
+                  <TouchableOpacity key={sp.id} style={[a.filterChip, selectedCouponSponsor === sp.id && a.filterChipActive]} onPress={() => setSelectedCouponSponsor(sp.id)}>
+                    <Text style={[a.filterChipTxt, selectedCouponSponsor === sp.id && a.filterChipTxtActive]}>{sp.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+          {filteredCoupons.length === 0 ? (
+            <View style={a.emptyState}>
+              <Ticket size={32} color={Colors.dark.textMuted} />
+              <Text style={a.emptyTxt}>Nenhum cupom nesta cidade</Text>
+            </View>
+          ) : (
+            filteredCoupons.map((c) => (
+              <View key={c.id} style={a.couponRow}>
+                <View style={[a.couponStatus, c.status === 'valid' ? a.couponStatusActive : c.status === 'used' ? a.couponStatusUsed : a.couponStatusExpired]} />
+                <View style={a.couponInfo}>
+                  <Text style={a.couponCode}>{c.code}</Text>
+                  <Text style={a.couponMeta}>{c.sponsorName} - R$ {c.value.toFixed(2)}</Text>
+                  <Text style={a.couponDate}>{new Date(c.scannedAt).toLocaleDateString('pt-BR')}</Text>
+                </View>
+                <View style={[a.couponBadge, c.status === 'valid' ? a.couponBadgeActive : c.status === 'used' ? a.couponBadgeUsed : a.couponBadgeExpired]}>
+                  <Text style={a.couponBadgeTxt}>{c.status === 'valid' ? 'Ativo' : c.status === 'used' ? 'Usado' : 'Expirado'}</Text>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+        <View style={a.section}>
+          <View style={a.secHdr}>
+            <Package size={18} color={Colors.dark.neonGreen} />
+            <Text style={a.secTtl}>Lotes de Cupons</Text>
+          </View>
+          {couponBatches.filter((b) => citySponsorIds.includes(b.sponsorId)).length === 0 ? (
+            <View style={a.emptyState}>
+              <Package size={32} color={Colors.dark.textMuted} />
+              <Text style={a.emptyTxt}>Nenhum lote gerado para esta cidade</Text>
+            </View>
+          ) : (
+            couponBatches.filter((b) => citySponsorIds.includes(b.sponsorId)).map((batch) => (
+              <View key={batch.id} style={a.batchRow}>
+                <View style={a.batchIcon}>
+                  <Hash size={16} color={Colors.dark.neonGreen} />
+                </View>
+                <View style={a.batchInfo}>
+                  <Text style={a.batchName}>{batch.sponsorName}</Text>
+                  <Text style={a.batchMeta}>{batch.quantity} cupons - R$ {batch.value.toFixed(2)} cada</Text>
+                </View>
+                <Text style={a.batchPrefix}>{batch.prefix}</Text>
+                <TouchableOpacity
+                  style={a.batchPrintBtn}
+                  onPress={() => handlePrintBatch(batch)}
+                  activeOpacity={0.7}
+                  testID={`print-batch-${batch.id}`}
+                >
+                  <Printer size={14} color={Colors.dark.neonGreen} />
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+          <TouchableOpacity style={a.addBtn} activeOpacity={0.8} onPress={() => setShowBatchModal(true)}>
+            <Plus size={16} color={Colors.dark.neonGreen} />
+            <Text style={a.addBtnTxt}>Gerar Novo Lote</Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    );
+  };
+
+  const handleOpenPromoForm = useCallback((promo?: PromotionalQR) => {
+    if (promo) {
+      setEditingPromo(promo);
+      setPromoForm({
+        sponsorId: promo.sponsorId,
+        sponsorName: promo.sponsorName,
+        sponsorAddress: promo.sponsorAddress,
+        message: promo.message,
+        couponValue: promo.couponValue.toString(),
+        minPurchase: promo.minPurchase.toString(),
+      });
+    } else {
+      setEditingPromo(null);
+      setPromoForm({ sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100' });
+    }
+    setShowPromoForm(true);
+  }, []);
+
+  const handleSavePromo = useCallback(() => {
+    if (!promoForm.sponsorName.trim()) {
+      Alert.alert('Erro', 'Nome da empresa e obrigatorio');
+      return;
+    }
+    if (!selectedCity) return;
+    const cityState = cities.find((c) => c.city === selectedCity)?.state ?? '';
+    const couponVal = parseFloat(promoForm.couponValue) || 10;
+    const minPurch = parseFloat(promoForm.minPurchase) || 100;
+    const defaultMsg = `Parabéns! Quer ganhar 1 Pix de R$ ${couponVal.toFixed(2)}? Vá até a loja ${promoForm.sponsorName} e faça uma compra mínima de R$ ${minPurch.toFixed(2)} e ganhe um cupom para receber um Pix de R$ ${couponVal.toFixed(2)}!`;
+
+    const promo: PromotionalQR = {
+      id: editingPromo?.id ?? `promo_${Date.now()}`,
+      sponsorId: promoForm.sponsorId || `sp_promo_${Date.now()}`,
+      sponsorName: promoForm.sponsorName.trim(),
+      sponsorAddress: promoForm.sponsorAddress.trim(),
+      city: selectedCity,
+      state: cityState,
+      message: promoForm.message.trim() || defaultMsg,
+      couponValue: couponVal,
+      minPurchase: minPurch,
+      createdAt: editingPromo?.createdAt ?? new Date().toISOString(),
+      active: true,
+    };
+
+    if (editingPromo) {
+      updatePromoQR(promo);
+      Alert.alert('Sucesso', `QR Promocional de ${promo.sponsorName} atualizado!`);
+    } else {
+      addPromoQR(promo);
+      Alert.alert('Sucesso', `QR Promocional de ${promo.sponsorName} criado!`);
+    }
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowPromoForm(false);
+    setEditingPromo(null);
+  }, [promoForm, selectedCity, editingPromo, cities, addPromoQR, updatePromoQR]);
+
+  const handleCopyPromoQR = useCallback(async (promo: PromotionalQR) => {
+    const payload = JSON.stringify({
+      type: 'cashbox_promo',
+      promoId: promo.id,
+      sponsorId: promo.sponsorId,
+      sponsorName: promo.sponsorName,
+      sponsorAddress: promo.sponsorAddress,
+      message: promo.message,
+      couponValue: promo.couponValue,
+      minPurchase: promo.minPurchase,
+      city: promo.city,
+      state: promo.state,
+    });
+    try {
+      await Clipboard.setStringAsync(payload);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Copiado!', 'Dados do QR Promocional copiados. Use um gerador de QR Code para criar o codigo com este conteudo.');
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel copiar');
+    }
+  }, []);
+
+  const handlePrintPromoQR = useCallback(async (promo: PromotionalQR) => {
+    try {
+      const qrData = encodeURIComponent(JSON.stringify({
+        type: 'cashbox_promo',
+        promoId: promo.id,
+        sponsorId: promo.sponsorId,
+        sponsorName: promo.sponsorName,
+        sponsorAddress: promo.sponsorAddress,
+        message: promo.message,
+        couponValue: promo.couponValue,
+        minPurchase: promo.minPurchase,
+        city: promo.city,
+        state: promo.state,
+      }));
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${qrData}&format=png&margin=8`;
+      const html = `
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body { font-family: sans-serif; text-align: center; padding: 20px; }
+  .title { font-size: 22px; font-weight: 900; margin-bottom: 4px; }
+  .sub { font-size: 14px; color: #666; margin-bottom: 16px; }
+  .qr { margin: 16px auto; }
+  .store { font-size: 18px; font-weight: 700; margin-top: 12px; }
+  .addr { font-size: 13px; color: #888; margin-top: 4px; }
+  .value { font-size: 16px; font-weight: 700; color: #F59E0B; margin-top: 10px; }
+  .sep { border-top: 2px dashed #ccc; margin: 16px 0; }
+  .hint { font-size: 11px; color: #aaa; }
+</style></head><body>
+  <div class="title">CASHBOX PIX</div>
+  <div class="sub">QR Code Promocional</div>
+  <img src="${qrUrl}" class="qr" width="250" height="250" />
+  <div class="store">${promo.sponsorName}</div>
+  <div class="addr">${promo.sponsorAddress}</div>
+  <div class="value">Pix R$ ${promo.couponValue.toFixed(2)} | Compra min R$ ${promo.minPurchase.toFixed(2)}</div>
+  <div class="sep"></div>
+  <div class="hint">Escaneie com o app CashBox PIX para ver a promocao</div>
+</body></html>`;
+      await Print.printAsync({ html });
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.log('[Admin] Print promo QR error:', err);
+      Alert.alert('Erro', 'Nao foi possivel imprimir');
+    }
+  }, []);
+
+  const renderCityPromoQR = () => {
+    const cityPromos = selectedCity ? getPromoQRsByCity(selectedCity) : [];
+
+    return (
+      <>
+        <View style={a.section}>
+          <View style={a.secHdr}>
+            <Gift size={18} color="#F59E0B" />
+            <Text style={a.secTtl}>QR Codes Promocionais - {selectedCity}</Text>
+          </View>
+          <Text style={pq.desc}>QR codes que exibem uma mensagem promocional ao usuario. Nao geram cupom - apenas convidam o usuario a ir ate a loja.</Text>
+
+          {cityPromos.length === 0 ? (
+            <View style={a.emptyState}>
+              <Gift size={32} color={Colors.dark.textMuted} />
+              <Text style={a.emptyTxt}>Nenhum QR promocional nesta cidade</Text>
+            </View>
+          ) : (
+            cityPromos.map((promo) => (
+              <View key={promo.id} style={pq.row}>
+                <View style={pq.rowIcon}>
+                  <Gift size={18} color="#F59E0B" />
+                </View>
+                <View style={pq.rowInfo}>
+                  <Text style={pq.rowName} numberOfLines={1}>{promo.sponsorName}</Text>
+                  <Text style={pq.rowAddr} numberOfLines={1}>{promo.sponsorAddress || 'Sem endereco'}</Text>
+                  <Text style={pq.rowValues}>Pix R$ {promo.couponValue.toFixed(2)} | Min R$ {promo.minPurchase.toFixed(2)}</Text>
+                </View>
+                <View style={pq.rowActions}>
+                  <TouchableOpacity style={pq.actBtn} onPress={() => handleCopyPromoQR(promo)}>
+                    <Copy size={14} color={Colors.dark.neonGreen} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={pq.actBtn} onPress={() => handlePrintPromoQR(promo)}>
+                    <Printer size={14} color={Colors.dark.neonGreen} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={pq.actBtn} onPress={() => handleOpenPromoForm(promo)}>
+                    <Edit3 size={14} color={Colors.dark.neonGreen} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[pq.actBtn, { backgroundColor: 'rgba(239,68,68,0.1)' }]} onPress={() => {
+                    Alert.alert('Excluir', `Excluir QR promocional de ${promo.sponsorName}?`, [
+                      { text: 'Cancelar', style: 'cancel' },
+                      { text: 'Excluir', style: 'destructive', onPress: () => deletePromoQR(promo.id) },
+                    ]);
+                  }}>
+                    <Trash2 size={14} color={Colors.dark.danger} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+
+          <TouchableOpacity style={a.addBtn} activeOpacity={0.8} onPress={() => handleOpenPromoForm()}>
+            <Plus size={16} color="#F59E0B" />
+            <Text style={[a.addBtnTxt, { color: '#FFBE0B' }]}>Novo QR Promocional</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Modal visible={showPromoForm} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowPromoForm(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={fm.container}>
+            <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+              <TouchableOpacity onPress={() => setShowPromoForm(false)} style={fm.closeBtn}>
+                <X size={22} color={Colors.dark.text} />
+              </TouchableOpacity>
+              <Text style={fm.headerTitle}>{editingPromo ? 'Editar QR Promo' : 'Novo QR Promo'}</Text>
+              <TouchableOpacity onPress={handleSavePromo} style={[fm.saveHeaderBtn, { backgroundColor: '#F59E0B' }]}>
+                <Text style={[fm.saveHeaderTxt, { color: '#fff' }]}>Salvar</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={fm.scroll} keyboardShouldPersistTaps="handled">
+              <View style={fm.section}>
+                <Text style={fm.sectionTitle}>Dados da Empresa</Text>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Nome da Empresa *</Text>
+                  <TextInput style={fm.input} value={promoForm.sponsorName} onChangeText={(v) => setPromoForm((p) => ({ ...p, sponsorName: v }))} placeholder="Ex: Supermercado Bom Preco" placeholderTextColor={Colors.dark.textMuted} />
+                </View>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Endereco da Empresa</Text>
+                  <TextInput style={fm.input} value={promoForm.sponsorAddress} onChangeText={(v) => setPromoForm((p) => ({ ...p, sponsorAddress: v }))} placeholder="Rua, numero, bairro" placeholderTextColor={Colors.dark.textMuted} />
+                </View>
+              </View>
+
+              <View style={fm.section}>
+                <Text style={fm.sectionTitle}>Valores da Promocao</Text>
+                <View style={fm.row}>
+                  <View style={[fm.field, { flex: 1 }]}>
+                    <Text style={fm.label}>Valor do Pix (R$)</Text>
+                    <TextInput style={fm.input} value={promoForm.couponValue} onChangeText={(v) => setPromoForm((p) => ({ ...p, couponValue: v }))} placeholder="10" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+                  </View>
+                  <View style={[fm.field, { flex: 1 }]}>
+                    <Text style={fm.label}>Compra Minima (R$)</Text>
+                    <TextInput style={fm.input} value={promoForm.minPurchase} onChangeText={(v) => setPromoForm((p) => ({ ...p, minPurchase: v }))} placeholder="100" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+                  </View>
+                </View>
+              </View>
+
+              <View style={fm.section}>
+                <Text style={fm.sectionTitle}>Mensagem Personalizada</Text>
+                <Text style={fm.sectionSub}>Deixe vazio para usar a mensagem padrao</Text>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Mensagem</Text>
+                  <TextInput style={[fm.input, fm.textArea]} value={promoForm.message} onChangeText={(v) => setPromoForm((p) => ({ ...p, message: v }))} placeholder={`Parabéns! Quer ganhar 1 Pix de R$ ${promoForm.couponValue || '10'},00?...`} placeholderTextColor={Colors.dark.textMuted} multiline numberOfLines={4} />
+                </View>
+              </View>
+
+              {promoForm.sponsorName.trim() ? (
+                <View style={fm.section}>
+                  <Text style={fm.sectionTitle}>Preview da Mensagem</Text>
+                  <View style={pq.previewCard}>
+                    <Text style={pq.previewEmoji}>🎉</Text>
+                    <Text style={pq.previewText}>
+                      {promoForm.message.trim() || `Parabéns! Quer ganhar 1 Pix de R$ ${parseFloat(promoForm.couponValue || '10').toFixed(2)}? Vá até a loja ${promoForm.sponsorName} e faça uma compra mínima de R$ ${parseFloat(promoForm.minPurchase || '100').toFixed(2)} e ganhe um cupom para receber um Pix de R$ ${parseFloat(promoForm.couponValue || '10').toFixed(2)}!`}
+                    </Text>
+                    <View style={pq.previewStore}>
+                      <Store size={14} color={Colors.dark.neonGreen} />
+                      <Text style={pq.previewStoreName}>{promoForm.sponsorName}</Text>
+                    </View>
+                    {promoForm.sponsorAddress.trim() ? (
+                      <View style={pq.previewAddr}>
+                        <MapPin size={12} color={Colors.dark.textMuted} />
+                        <Text style={pq.previewAddrText}>{promoForm.sponsorAddress}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+
+              <TouchableOpacity style={[fm.saveFullBtn, { shadowColor: '#F59E0B' }]} onPress={handleSavePromo} activeOpacity={0.8}>
+                <LinearGradient colors={['#FFBE0B', '#FF8C00']} style={fm.saveFullGrad}>
+                  <Save size={18} color="#fff" />
+                  <Text style={[fm.saveFullTxt, { color: '#fff' }]}>SALVAR QR PROMOCIONAL</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </Modal>
+      </>
+    );
+  };
+
+  const renderCityNotifications = () => (
+    <View style={a.section}>
+      <View style={a.secHdr}>
+        <Bell size={18} color={Colors.dark.warning} />
+        <Text style={a.secTtl}>Notificacoes</Text>
+      </View>
+      {notifications.length === 0 ? (
+        <View style={a.emptyState}>
+          <Bell size={32} color={Colors.dark.textMuted} />
+          <Text style={a.emptyTxt}>Nenhuma notificacao</Text>
+        </View>
+      ) : (
+        notifications.map((notif) => (
+          <View key={notif.id} style={a.notifRow}>
+            <View style={a.notifLeft}>
+              <View style={[a.notifTypeDot, notif.type === 'promo' ? { backgroundColor: Colors.dark.neonGreen } : notif.type === 'prize' ? { backgroundColor: Colors.dark.gold } : { backgroundColor: Colors.dark.warning }]} />
+              <View style={a.notifInfo}>
+                <Text style={a.notifTitle} numberOfLines={1}>{notif.title}</Text>
+                <Text style={a.notifMsg} numberOfLines={2}>{notif.message}</Text>
+                <View style={a.notifMeta}>
+                  <Text style={a.notifDate}>{new Date(notif.createdAt).toLocaleDateString('pt-BR')}</Text>
+                  {notif.sent && (
+                    <View style={a.notifSentBadge}>
+                      <Check size={10} color="#000" />
+                      <Text style={a.notifSentTxt}>Enviada</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+            <View style={a.notifActions}>
+              <TouchableOpacity style={a.notifActBtn} onPress={() => { setEditingNotif(notif); setShowNotifModal(true); }}>
+                <Edit3 size={14} color={Colors.dark.neonGreen} />
+              </TouchableOpacity>
+              {!notif.sent && (
+                <TouchableOpacity style={a.notifActBtn} onPress={() => handleSendNotification(notif)}>
+                  <Send size={14} color={Colors.dark.warning} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={[a.notifActBtn, { backgroundColor: 'rgba(239,68,68,0.1)' }]} onPress={() => {
+                Alert.alert('Excluir', 'Excluir esta notificacao?', [
+                  { text: 'Cancelar', style: 'cancel' },
+                  { text: 'Excluir', style: 'destructive', onPress: () => deleteNotification(notif.id) },
+                ]);
+              }}>
+                <Trash2 size={14} color={Colors.dark.danger} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))
+      )}
+      <TouchableOpacity style={a.addBtn} activeOpacity={0.8} onPress={() => { setEditingNotif(null); setShowNotifModal(true); }}>
+        <Plus size={16} color={Colors.dark.neonGreen} />
+        <Text style={a.addBtnTxt}>Nova Notificacao</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  return (
+    <View style={a.ctr}>
+      <LinearGradient colors={[Colors.dark.background, '#EDF0F4', '#E8ECF1']} style={a.bgGrad} start={{ x: 0, y: 0 }} end={{ x: 0.5, y: 1 }} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={a.sc}>
+        <View style={a.hdrBanner}>
+          <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim, '#162D6B']} style={a.hdrGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+            <Shield size={24} color="#000" />
+            <Text style={a.hdrTtl}>Painel Administrativo</Text>
+          </LinearGradient>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={a.tabBar} contentContainerStyle={a.tabBarContent}>
+          <TabButton label="Visao Geral" active={mainTab === 'overview'} onPress={() => { setMainTab('overview'); setSelectedCity(null); setSelectedState(null); }} icon={BarChart3} />
+          <TabButton label="Estados" active={mainTab === 'states'} onPress={() => { setMainTab('states'); setSelectedCity(null); setSelectedState(null); }} icon={Globe} />
+          <TabButton label="Cidades" active={mainTab === 'cities'} onPress={() => { setMainTab('cities'); setSelectedCity(null); setSelectedState(null); }} icon={Building2} />
+        </ScrollView>
+
+        {mainTab === 'overview' && renderOverview()}
+        {mainTab === 'states' && renderStates()}
+        {mainTab === 'cities' && renderCityPanel()}
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      <SponsorFormModal
+        visible={showSponsorModal}
+        onClose={() => { setShowSponsorModal(false); setEditingSponsor(null); }}
+        onSave={handleSaveSponsor}
+        initialData={sponsorFormData}
+        title={editingSponsor ? 'Editar Patrocinador' : 'Novo Patrocinador'}
+      />
+
+      <CouponBatchModal
+        visible={showBatchModal}
+        onClose={() => setShowBatchModal(false)}
+        sponsors={selectedCity ? citySponsors : sponsors}
+        onGenerate={addCouponBatch}
+      />
+
+      <NotificationModal
+        visible={showNotifModal}
+        onClose={() => { setShowNotifModal(false); setEditingNotif(null); }}
+        onSave={(notif) => {
+          if (editingNotif) {
+            updateNotification(notif);
+          } else {
+            addNotification(notif);
+          }
+        }}
+        initialData={editingNotif}
+      />
+    </View>
+  );
+}
+
+const a = StyleSheet.create({
+  ctr: { flex: 1, backgroundColor: Colors.dark.background },
+  bgGrad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  sc: { paddingBottom: 20 },
+  denied: { flex: 1, backgroundColor: Colors.dark.background, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  deniedTtl: { color: Colors.dark.text, fontSize: 22, fontWeight: '700' as const, marginTop: 16 },
+  deniedSub: { color: Colors.dark.textSecondary, fontSize: 14, textAlign: 'center' as const, marginTop: 8 },
+  hdrBanner: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, overflow: 'hidden', shadowColor: "#00FF87", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 12, elevation: 6 },
+  hdrGrad: { padding: 24, alignItems: 'center' as const, gap: 6 },
+  hdrTtl: { color: '#000', fontSize: 22, fontWeight: '800' as const },
+  hdrSub: { color: 'rgba(0,0,0,0.6)', fontSize: 13 },
+  tabBar: { marginTop: 16, marginBottom: 4 },
+  tabBarContent: { paddingHorizontal: 16, gap: 8 },
+  statsRow: { flexDirection: 'row' as const, paddingHorizontal: 16, gap: 10, marginTop: 12 },
+  statCard: { flex: 1, backgroundColor: Colors.dark.card, borderRadius: 14, padding: 14, alignItems: 'center' as const, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  statIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const, marginBottom: 8 },
+  statVal: { color: Colors.dark.text, fontSize: 22, fontWeight: '800' as const },
+  statLbl: { color: Colors.dark.textSecondary, fontSize: 10, marginTop: 2, fontWeight: '500' as const },
+  section: { marginHorizontal: 16, marginTop: 16, backgroundColor: Colors.dark.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  secHdr: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginBottom: 14 },
+  secTtl: { color: Colors.dark.text, fontSize: 16, fontWeight: '700' as const },
+  field: { marginBottom: 12 },
+  fLbl: { color: Colors.dark.textSecondary, fontSize: 12, fontWeight: '600' as const, marginBottom: 6 },
+  fieldHint: { color: Colors.dark.textMuted, fontSize: 10, marginTop: 4 },
+  inp: { backgroundColor: Colors.dark.inputBg, borderRadius: 12, padding: 12, color: Colors.dark.text, fontSize: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder },
+  saveBtn: { borderRadius: 12, overflow: 'hidden', marginTop: 4, shadowColor: "#00FF87", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4 },
+  saveBtnG: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, paddingVertical: 12, gap: 8 },
+  saveBtnT: { color: '#000', fontSize: 13, fontWeight: '700' as const, letterSpacing: 0.5 },
+  prizePreview: { borderRadius: 14, overflow: 'hidden', marginBottom: 12, height: 160, position: 'relative' as const },
+  prizePreviewImg: { width: '100%', height: '100%' },
+  prizePreviewOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 10, backgroundColor: 'rgba(0,0,0,0.45)', flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const },
+  prizePreviewTxt: { color: '#fff', fontSize: 12, fontWeight: '600' as const },
+  pickImgBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint, borderStyle: 'dashed' as const },
+  pickImgTxt: { color: Colors.dark.neonGreen, fontSize: 13, fontWeight: '600' as const },
+  changeBgBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  changeBgTxt: { color: '#fff', fontSize: 11, fontWeight: '600' as const },
+  summaryGrid: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 8 },
+  summaryItem: { width: '47%' as any, backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, padding: 14, alignItems: 'center' as const },
+  summaryVal: { color: Colors.dark.text, fontSize: 20, fontWeight: '800' as const },
+  summaryLbl: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 4, fontWeight: '500' as const },
+  spRow: { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, padding: 12, marginBottom: 8 },
+  spLogo: { width: 44, height: 44, borderRadius: 10, backgroundColor: Colors.dark.inputBg },
+  spInfo: { flex: 1, marginLeft: 10 },
+  spNameRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  spName: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const, flex: 1 },
+  spMeta: { color: Colors.dark.textSecondary, fontSize: 11, marginTop: 2 },
+  spOffers: { color: Colors.dark.textMuted, fontSize: 10, marginTop: 2 },
+  spActions: { flexDirection: 'row' as const, gap: 8, marginLeft: 8 },
+  spActBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+  spActDel: { backgroundColor: 'rgba(239,68,68,0.1)' },
+  emptyState: { alignItems: 'center' as const, paddingVertical: 24, gap: 8 },
+  emptyTxt: { color: Colors.dark.textMuted, fontSize: 14 },
+  seedBtn: { marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' as const, shadowColor: '#10B981', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
+  seedBtnGrad: { paddingVertical: 18, paddingHorizontal: 20, alignItems: 'center' as const, gap: 4 },
+  seedBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' as const, letterSpacing: 1 },
+  seedBtnSub: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '500' as const },
+  addBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed' as const, borderColor: Colors.dark.neonGreen, marginTop: 4 },
+  addBtnTxt: { color: Colors.dark.neonGreen, fontSize: 13, fontWeight: '600' as const },
+  actionRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
+  actIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 12 },
+  actInfo: { flex: 1 },
+  actTtl: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const },
+  actSub: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+  backBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, marginHorizontal: 16, marginTop: 12, paddingVertical: 8 },
+  backBtnTxt: { color: Colors.dark.neonGreen, fontSize: 14, fontWeight: '600' as const },
+  cityHeaderCard: { marginHorizontal: 16, marginTop: 8, borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10, elevation: 5 },
+  cityHeaderGrad: { padding: 24, alignItems: 'center' as const, gap: 6 },
+  cityHeaderName: { color: '#fff', fontSize: 26, fontWeight: '900' as const, letterSpacing: 0.5 },
+  cityHeaderSub: { color: 'rgba(255,255,255,0.75)', fontSize: 13 },
+  cityHeaderImgWrap: { width: '100%', height: 180 },
+  cityHeaderBgImg: { width: '100%', height: '100%' },
+  cityHeaderImgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, padding: 24 },
+  cityPhotoBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, marginTop: 6 },
+  cityPhotoBtnTxt: { color: '#fff', fontSize: 12, fontWeight: '600' as const },
+  stateRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 12 },
+  stateIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.dark.purple, alignItems: 'center' as const, justifyContent: 'center' as const },
+  stateInfo: { flex: 1 },
+  stateName: { color: Colors.dark.text, fontSize: 18, fontWeight: '800' as const },
+  stateMeta: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 2 },
+  stateCountBadge: { backgroundColor: Colors.dark.neonGreen, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  stateCountTxt: { color: '#000', fontSize: 13, fontWeight: '800' as const },
+  cityRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 10 },
+  cityRowIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,107,0,0.1)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  cityRowInfo: { flex: 1 },
+  cityRowName: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
+  cityRowMeta: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+  cityPrizeBadge: { backgroundColor: Colors.dark.gold, width: 22, height: 22, borderRadius: 11, alignItems: 'center' as const, justifyContent: 'center' as const },
+  cityRowCount: { backgroundColor: Colors.dark.neonGreenFaint, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  cityRowCountTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '800' as const },
+  filterScroll: { marginBottom: 12 },
+  filterScrollContent: { gap: 8 },
+  filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight },
+  filterChipActive: { backgroundColor: Colors.dark.neonGreen },
+  filterChipTxt: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '600' as const },
+  filterChipTxtActive: { color: '#000', fontWeight: '700' as const },
+  sponsorFilterSection: { marginBottom: 12 },
+  couponRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 10 },
+  couponStatus: { width: 8, height: 8, borderRadius: 4 },
+  couponStatusActive: { backgroundColor: Colors.dark.neonGreen },
+  couponStatusUsed: { backgroundColor: Colors.dark.textMuted },
+  couponStatusExpired: { backgroundColor: Colors.dark.danger },
+  couponInfo: { flex: 1 },
+  couponCode: { color: Colors.dark.text, fontSize: 13, fontWeight: '700' as const, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  couponMeta: { color: Colors.dark.textSecondary, fontSize: 11, marginTop: 2 },
+  couponDate: { color: Colors.dark.textMuted, fontSize: 10, marginTop: 1 },
+  couponBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  couponBadgeActive: { backgroundColor: Colors.dark.neonGreenFaint },
+  couponBadgeUsed: { backgroundColor: Colors.dark.surfaceLight },
+  couponBadgeExpired: { backgroundColor: 'rgba(239,68,68,0.1)' },
+  couponBadgeTxt: { fontSize: 10, fontWeight: '700' as const, color: Colors.dark.textSecondary },
+  batchRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 10 },
+  batchIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+  batchInfo: { flex: 1 },
+  batchName: { color: Colors.dark.text, fontSize: 13, fontWeight: '600' as const },
+  batchMeta: { color: Colors.dark.textSecondary, fontSize: 11, marginTop: 2 },
+  batchPrefix: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '700' as const, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  batchPrintBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center' as const, justifyContent: 'center' as const, marginLeft: 6 },
+  notifRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 8 },
+  notifLeft: { flex: 1, flexDirection: 'row' as const, gap: 10, alignItems: 'flex-start' as const },
+  notifTypeDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
+  notifInfo: { flex: 1 },
+  notifTitle: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const },
+  notifMsg: { color: Colors.dark.textSecondary, fontSize: 12, marginTop: 3, lineHeight: 18 },
+  notifMeta: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginTop: 6 },
+  notifDate: { color: Colors.dark.textMuted, fontSize: 10 },
+  notifSentBadge: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 3, backgroundColor: Colors.dark.neonGreen, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  notifSentTxt: { color: '#000', fontSize: 9, fontWeight: '700' as const },
+  notifActions: { flexDirection: 'row' as const, gap: 6 },
+  notifActBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+});
+
+const pq = StyleSheet.create({
+  desc: { color: Colors.dark.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, padding: 12, marginBottom: 8, gap: 10 },
+  rowIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,190,11,0.1)', alignItems: 'center', justifyContent: 'center' },
+  rowInfo: { flex: 1 },
+  rowName: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const },
+  rowAddr: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+  rowValues: { color: '#FFBE0B', fontSize: 11, fontWeight: '700' as const, marginTop: 3 },
+  rowActions: { flexDirection: 'row', gap: 6 },
+  actBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center', justifyContent: 'center' },
+  previewCard: { backgroundColor: 'rgba(255,190,11,0.06)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(255,190,11,0.15)', alignItems: 'center', gap: 8 },
+  previewEmoji: { fontSize: 32 },
+  previewText: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const, lineHeight: 20, textAlign: 'center' as const },
+  previewStore: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  previewStoreName: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
+  previewAddr: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  previewAddrText: { color: Colors.dark.textMuted, fontSize: 12 },
+});

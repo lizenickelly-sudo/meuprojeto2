@@ -1,0 +1,15 @@
+{
+  "$schema": "https://rork.com/schema/rork.json",
+  "apps": [
+    {
+      "name": "Caça ao Tesouro PIX",
+      "path": "expo",
+      "framework": "react-native"
+    },
+    {
+      "name": "Caça ao Tesouro PIX",
+      "path": "expo",
+      "framework": "react-native"
+    }
+  ]
+}
