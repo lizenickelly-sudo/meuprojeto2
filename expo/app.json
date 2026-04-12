@@ -27,9 +27,6 @@
       "package": "app.rork.itpmn8bnhs7ry665ktflm",
       "permissions": [
         "CAMERA",
-        "RECEIVE_BOOT_COMPLETED",
-        "SCHEDULE_EXACT_ALARM",
-        "POST_NOTIFICATIONS",
         "VIBRATE"
       ]
     },
@@ -43,16 +40,7 @@
           "origin": "https://rork.com/"
         }
       ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/icon.png",
-          "color": "#00FF87",
-          "defaultChannel": "default",
-          "sounds": []
-        }
-      ],
-      [
+[
         "expo-camera",
         {
           "cameraPermission": "Permitir acesso à câmera para escanear QR Codes de cupons."
