@@ -2130,6 +2130,7 @@ export default function AdminPanel() {
 
   const handlePrintPromoQR = useCallback(async (promo: PromotionalQR) => {
     try {
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       const qrData = encodeURIComponent(JSON.stringify({
         type: 'cashbox_promo',
         promoId: promo.id,
@@ -2143,29 +2144,63 @@ export default function AdminPanel() {
         state: promo.state,
       }));
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${qrData}&format=png&margin=8`;
+      const promoMessage = promo.message || `Parabéns! Quer ganhar 1 Pix de R$ ${promo.couponValue.toFixed(2)}? Vá até a loja ${promo.sponsorName} e faça uma compra mínima de R$ ${promo.minPurchase.toFixed(2)} e ganhe um cupom para receber um Pix de R$ ${promo.couponValue.toFixed(2)}!`;
       const html = `
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-  body { font-family: sans-serif; text-align: center; padding: 20px; }
-  .title { font-size: 22px; font-weight: 900; margin-bottom: 4px; }
-  .sub { font-size: 14px; color: #666; margin-bottom: 16px; }
-  .qr { margin: 16px auto; }
-  .store { font-size: 18px; font-weight: 700; margin-top: 12px; }
-  .addr { font-size: 13px; color: #888; margin-top: 4px; }
-  .value { font-size: 16px; font-weight: 700; color: #F59E0B; margin-top: 10px; }
-  .sep { border-top: 2px dashed #ccc; margin: 16px 0; }
-  .hint { font-size: 11px; color: #aaa; }
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
+  @page { margin: 10mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center; padding: 24px; background: #fff; color: #000; }
+  .container { max-width: 400px; margin: 0 auto; border: 2px solid #222; border-radius: 16px; padding: 28px 20px; }
+  .title { font-size: 24px; font-weight: 900; letter-spacing: 1px; margin-bottom: 2px; }
+  .sub { font-size: 13px; color: #888; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .qr-wrap { background: #f9f9f9; border-radius: 12px; padding: 16px; display: inline-block; margin: 12px auto; }
+  .qr { display: block; margin: 0 auto; }
+  .store { font-size: 20px; font-weight: 800; margin-top: 16px; color: #111; }
+  .addr { font-size: 13px; color: #777; margin-top: 6px; }
+  .value { font-size: 17px; font-weight: 800; color: #F59E0B; margin-top: 14px; background: rgba(245,158,11,0.08); display: inline-block; padding: 8px 20px; border-radius: 8px; }
+  .sep { border-top: 2px dashed #ddd; margin: 20px 0; }
+  .message { font-size: 13px; color: #555; line-height: 1.6; margin-bottom: 16px; padding: 0 8px; }
+  .hint { font-size: 11px; color: #aaa; margin-top: 8px; }
+  .footer { font-size: 10px; color: #bbb; margin-top: 16px; }
+  @media print {
+    body { padding: 0; }
+    .container { border: 2px solid #000; }
+  }
 </style></head><body>
-  <div class="title">CASHBOX PIX</div>
-  <div class="sub">QR Code Promocional</div>
-  <img src="${qrUrl}" class="qr" width="250" height="250" />
-  <div class="store">${promo.sponsorName}</div>
-  <div class="addr">${promo.sponsorAddress}</div>
-  <div class="value">Pix R$ ${promo.couponValue.toFixed(2)} | Compra min R$ ${promo.minPurchase.toFixed(2)}</div>
-  <div class="sep"></div>
-  <div class="hint">Escaneie com o app CashBox PIX para ver a promocao</div>
+  <div class="container">
+    <div class="title">CASHBOX PIX</div>
+    <div class="sub">QR Code Promocional</div>
+    <div class="sep"></div>
+    <div class="message">${promoMessage}</div>
+    <div class="qr-wrap">
+      <img src="${qrUrl}" class="qr" width="220" height="220" alt="QR Code" />
+    </div>
+    <div class="store">${promo.sponsorName}</div>
+    ${promo.sponsorAddress ? `<div class="addr">${promo.sponsorAddress}</div>` : ''}
+    <div class="value">Pix R$ ${promo.couponValue.toFixed(2)} | Compra min R$ ${promo.minPurchase.toFixed(2)}</div>
+    <div class="sep"></div>
+    <div class="hint">Escaneie com o app CashBox PIX para ver a promocao</div>
+    <div class="footer">Impresso em ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+  </div>
 </body></html>`;
-      await Print.printAsync({ html });
+      console.log('[Admin] Printing promo QR for:', promo.sponsorName);
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank', 'width=600,height=800');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.onload = () => {
+            setTimeout(() => {
+              printWindow.print();
+            }, 500);
+          };
+        } else {
+          await Print.printAsync({ html });
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       console.log('[Admin] Print promo QR error:', err);
