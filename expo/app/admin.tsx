@@ -930,7 +930,22 @@ function CouponBatchModal({
     try {
       const html = generateThermalPrintHTML(batch);
       console.log('[CouponBatch] Printing batch:', batch.id, 'codes:', batch.codes.length);
-      await Print.printAsync({ html });
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank', 'width=800,height=600');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.onload = () => {
+            setTimeout(() => {
+              printWindow.print();
+            }, 500);
+          };
+        } else {
+          await Print.printAsync({ html });
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       console.log('[CouponBatch] Print error:', err);
@@ -1162,6 +1177,7 @@ export default function AdminPanel() {
     validCoupons,
     usedCoupons,
     couponsBySponsor,
+    addCouponRaw,
   } = useCoupon();
 
   const [mainTab, setMainTab] = useState<MainTab>('overview');
@@ -1345,7 +1361,22 @@ export default function AdminPanel() {
       if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       console.log('[Admin] Printing batch:', batch.id, 'with', batch.codes.length, 'codes');
       const html = generateThermalPrintHTML(batch);
-      await Print.printAsync({ html });
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank', 'width=800,height=600');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.onload = () => {
+            setTimeout(() => {
+              printWindow.print();
+            }, 500);
+          };
+        } else {
+          await Print.printAsync({ html });
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       console.log('[Admin] Print error:', err);
@@ -2376,7 +2407,25 @@ export default function AdminPanel() {
         visible={showBatchModal}
         onClose={() => setShowBatchModal(false)}
         sponsors={selectedCity ? citySponsors : sponsors}
-        onGenerate={addCouponBatch}
+        onGenerate={(batch) => {
+          addCouponBatch(batch);
+          console.log('[Admin] Generating individual coupons from batch:', batch.id, batch.codes.length, 'codes');
+          batch.codes.forEach((code) => {
+            const coupon: import('@/types').Coupon = {
+              id: `coupon_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+              code,
+              value: batch.value,
+              sponsorId: batch.sponsorId,
+              sponsorName: batch.sponsorName,
+              status: 'valid',
+              scannedAt: batch.createdAt,
+              expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+              drawId: batch.id,
+            };
+            addCouponRaw(coupon);
+          });
+          console.log('[Admin] Individual coupons created from batch');
+        }}
       />
 
       <NotificationModal
