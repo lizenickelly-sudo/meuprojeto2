@@ -867,10 +867,23 @@ function CouponBatchModal({
   const [selectedSponsor, setSelectedSponsor] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('10');
   const [value, setValue] = useState<string>('10');
-  const [prefix, setPrefix] = useState<string>('CBX');
   const [showSponsorPicker, setShowSponsorPicker] = useState<boolean>(false);
 
   const selectedSponsorObj = sponsors.find((s) => s.id === selectedSponsor);
+
+  const generateLotteryNumber = useCallback(() => {
+    return Math.floor(10000 + Math.random() * 90000).toString();
+  }, []);
+
+  const buildPrefix = useCallback((sponsor: Sponsor | undefined) => {
+    if (!sponsor) return '';
+    const stateCode = sponsor.state.toUpperCase().substring(0, 2);
+    const cityCode = sponsor.city.toUpperCase().replace(/\s+/g, '').substring(0, 3);
+    const lottery = generateLotteryNumber();
+    return `${stateCode}-${cityCode}-${lottery}`;
+  }, [generateLotteryNumber]);
+
+  const generatedPrefix = useMemo(() => buildPrefix(selectedSponsorObj), [selectedSponsorObj, buildPrefix]);
 
   const handleGenerate = useCallback(() => {
     if (!selectedSponsor) {
@@ -889,7 +902,9 @@ function CouponBatchModal({
     }
     const codes: string[] = [];
     for (let i = 0; i < qty; i++) {
-      const code = `${prefix}${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const pfx = buildPrefix(selectedSponsorObj);
+      const seq = String(i + 1).padStart(3, '0');
+      const code = `${pfx}-${seq}`;
       codes.push(code);
     }
     const batch: CouponBatch = {
@@ -898,7 +913,7 @@ function CouponBatchModal({
       sponsorName: selectedSponsorObj?.name ?? '',
       quantity: qty,
       value: val,
-      prefix: prefix,
+      prefix: generatedPrefix,
       createdAt: new Date().toISOString(),
       codes,
     };
@@ -909,7 +924,7 @@ function CouponBatchModal({
       { text: 'Imprimir', onPress: () => printBatchCoupons(batch) },
     ]);
     onClose();
-  }, [selectedSponsor, quantity, value, prefix, selectedSponsorObj, onGenerate, onClose]);
+  }, [selectedSponsor, quantity, value, selectedSponsorObj, generatedPrefix, buildPrefix, onGenerate, onClose]);
 
   const printBatchCoupons = useCallback(async (batch: CouponBatch) => {
     try {
@@ -973,8 +988,14 @@ function CouponBatchModal({
               </View>
             </View>
             <View style={fm.field}>
-              <Text style={fm.label}>Prefixo do codigo</Text>
-              <TextInput style={fm.input} value={prefix} onChangeText={setPrefix} placeholder="CBX" placeholderTextColor={Colors.dark.textMuted} autoCapitalize="characters" maxLength={6} />
+              <Text style={fm.label}>Prefixo do codigo (auto)</Text>
+              <View style={[fm.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                <Text style={{ color: generatedPrefix ? Colors.dark.text : Colors.dark.textMuted, fontSize: 14, fontWeight: '600' as const }}>
+                  {generatedPrefix || 'Selecione um patrocinador'}
+                </Text>
+                <Text style={{ color: Colors.dark.textMuted, fontSize: 11 }}>Estado-Cidade-Sorteio</Text>
+              </View>
+              <Text style={{ color: Colors.dark.textMuted, fontSize: 11, marginTop: 4 }}>Formato: UF-CID-XXXXX (numero da Loteria Federal)</Text>
             </View>
           </View>
           <TouchableOpacity style={fm.saveFullBtn} onPress={handleGenerate} activeOpacity={0.8}>
