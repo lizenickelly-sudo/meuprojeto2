@@ -4,10 +4,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { Coupon, ScannedMessage } from '@/types';
 
+export interface LotteryNumber {
+  couponId: string;
+  couponCode: string;
+  lotteryCode: string;
+  sponsorName: string;
+  scannedAt: string;
+}
+
 const STORAGE_KEYS = {
   COUPONS: 'cashboxpix_coupons',
   SCANNED_MESSAGES: 'cashboxpix_scanned_messages',
   REDEEMED_CODES: 'cashboxpix_redeemed_codes',
+  LOTTERY_NUMBERS: 'cashboxpix_lottery_numbers',
 };
 
 export const [CouponProvider, useCoupon] = createContextHook(() => {
@@ -15,6 +24,7 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [scannedMessages, setScannedMessages] = useState<ScannedMessage[]>([]);
   const [redeemedCodes, setRedeemedCodes] = useState<string[]>([]);
+  const [lotteryNumbers, setLotteryNumbers] = useState<LotteryNumber[]>([]);
 
   const couponsQuery = useQuery({
     queryKey: ['user_coupons'],
@@ -29,6 +39,14 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
     queryFn: async () => {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.SCANNED_MESSAGES);
       return stored ? JSON.parse(stored) as ScannedMessage[] : [];
+    },
+  });
+
+  const lotteryNumbersQuery = useQuery({
+    queryKey: ['lottery_numbers'],
+    queryFn: async () => {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.LOTTERY_NUMBERS);
+      return stored ? JSON.parse(stored) as LotteryNumber[] : [];
     },
   });
 
@@ -51,6 +69,10 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
   useEffect(() => {
     if (redeemedCodesQuery.data) setRedeemedCodes(redeemedCodesQuery.data);
   }, [redeemedCodesQuery.data]);
+
+  useEffect(() => {
+    if (lotteryNumbersQuery.data) setLotteryNumbers(lotteryNumbersQuery.data);
+  }, [lotteryNumbersQuery.data]);
 
   const addCouponMutation = useMutation({
     mutationFn: async (coupon: Coupon) => {
@@ -98,9 +120,38 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
     },
   });
 
+  const saveLotteryNumbersMutation = useMutation({
+    mutationFn: async (numbers: LotteryNumber[]) => {
+      await AsyncStorage.setItem(STORAGE_KEYS.LOTTERY_NUMBERS, JSON.stringify(numbers));
+      return numbers;
+    },
+    onSuccess: (data) => {
+      setLotteryNumbers(data);
+      queryClient.invalidateQueries({ queryKey: ['lottery_numbers'] });
+    },
+  });
+
+  const extractLotteryCode = useCallback((code: string): string => {
+    const parts = code.split('-');
+    if (parts.length >= 3) return parts[parts.length - 1];
+    if (code.length >= 5) return code.slice(-5);
+    return code;
+  }, []);
+
   const addCouponRaw = useCallback((coupon: Coupon) => {
     addCouponMutation.mutate(coupon);
-  }, [addCouponMutation]);
+    const lotteryCode = extractLotteryCode(coupon.code);
+    const entry: LotteryNumber = {
+      couponId: coupon.id,
+      couponCode: coupon.code,
+      lotteryCode,
+      sponsorName: coupon.sponsorName,
+      scannedAt: coupon.scannedAt,
+    };
+    const updated = [...lotteryNumbers, entry];
+    saveLotteryNumbersMutation.mutate(updated);
+    console.log('[CouponProvider] Lottery number added:', lotteryCode);
+  }, [addCouponMutation, lotteryNumbers, saveLotteryNumbersMutation, extractLotteryCode]);
 
   const updateCouponStatus = useCallback((couponId: string, status: Coupon['status']) => {
     updateCouponStatusMutation.mutate({ couponId, status });
@@ -139,6 +190,11 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
     return map;
   }, [coupons]);
 
+  const clearLotteryNumbers = useCallback(() => {
+    console.log('[CouponProvider] Clearing lottery numbers after draw');
+    saveLotteryNumbersMutation.mutate([]);
+  }, [saveLotteryNumbersMutation]);
+
   const isLoading = couponsQuery.isLoading;
 
   return {
@@ -155,6 +211,8 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
     redeemedCodes,
     markCodeRedeemed,
     isCodeRedeemed,
+    lotteryNumbers,
+    clearLotteryNumbers,
     isLoading,
   };
 });

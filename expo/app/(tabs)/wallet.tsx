@@ -3,12 +3,13 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { Wallet, ArrowUpRight, ArrowDownLeft, Star, DollarSign, Share2, Shield, Clock, X, FileText, CheckCircle, Gift, Lock, Copy, Users, Send } from 'lucide-react-native';
+import { Wallet, ArrowUpRight, ArrowDownLeft, Star, DollarSign, Share2, Shield, Clock, X, FileText, CheckCircle, Gift, Lock, Copy, Users, Send, Ticket, Trash2, Hash } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { Share } from 'react-native';
 import Colors from '@/constants/colors';
 import { useUser } from '@/providers/UserProvider';
+import { useCoupon } from '@/providers/CouponProvider';
 import type { Transaction } from '@/types';
 
 function ReceiptModal({ tx, onClose }: { tx: Transaction; onClose: () => void }) {
@@ -122,6 +123,7 @@ export default function WalletScreen() {
   const ins = useSafeAreaInsets();
   const router = useRouter();
   const { balance, points, transactions, profile, redeemPoints, redeemPointsPending, getPointsRedeemInfo, referralCount, getReferralCode } = useUser();
+  const { lotteryNumbers, clearLotteryNumbers } = useCoupon();
   const [copiedRef, setCopiedRef] = useState<boolean>(false);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -190,6 +192,50 @@ export default function WalletScreen() {
               <Text style={[w.stLbl, { color: Colors.dark.warning, fontSize: 9 }]}>Falta R$ {getPointsRedeemInfo().remaining.toFixed(2)}</Text>
             )}
           </TouchableOpacity>
+        </View>
+
+        <View style={lt.section}>
+          <View style={lt.header}>
+            <Ticket size={18} color="#8B5CF6" />
+            <Text style={lt.headerTitle}>Números do Sorteio</Text>
+            <Text style={lt.headerCount}>{lotteryNumbers.length} número{lotteryNumbers.length !== 1 ? 's' : ''}</Text>
+          </View>
+          <View style={lt.card}>
+            {lotteryNumbers.length === 0 ? (
+              <View style={lt.empty}>
+                <Hash size={32} color={Colors.dark.textMuted} />
+                <Text style={lt.emptyTitle}>Nenhum número ainda</Text>
+                <Text style={lt.emptyDesc}>Escaneie cupons para receber números e participar do sorteio pela Loteria Federal</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={lt.info}>Seus números para o próximo sorteio da Loteria Federal:</Text>
+                <View style={lt.numbersGrid}>
+                  {lotteryNumbers.map((ln, idx) => (
+                    <View key={ln.couponId} style={lt.numberItem}>
+                      <View style={lt.numberBadge}>
+                        <Text style={lt.numberText}>{ln.lotteryCode}</Text>
+                      </View>
+                      <Text style={lt.numberSponsor} numberOfLines={1}>{ln.sponsorName}</Text>
+                      <Text style={lt.numberDate}>{new Date(ln.scannedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</Text>
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={lt.clearBtn}
+                  onPress={() => {
+                    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    clearLotteryNumbers();
+                  }}
+                  activeOpacity={0.7}
+                  testID="clear-lottery-btn"
+                >
+                  <Trash2 size={14} color={Colors.dark.danger} />
+                  <Text style={lt.clearBtnTxt}>Limpar após sorteio realizado</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
 
         <View style={w.refSection}>
@@ -292,4 +338,24 @@ const w = StyleSheet.create({
   refStatVal: { color: Colors.dark.primary, fontSize: 18, fontWeight: '800' as const },
   refStatLbl: { color: Colors.dark.textSecondary, fontSize: 10, marginTop: 2 },
   refStatDiv: { width: 1, height: 28, backgroundColor: Colors.dark.cardBorder },
+});
+
+const lt = StyleSheet.create({
+  section: { marginHorizontal: 16, marginTop: 20 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  headerTitle: { fontSize: 15, fontWeight: '700' as const, color: Colors.dark.text, flex: 1 },
+  headerCount: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '500' as const },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(139,92,246,0.15)' },
+  info: { color: Colors.dark.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  empty: { alignItems: 'center', paddingVertical: 20, gap: 6 },
+  emptyTitle: { color: Colors.dark.textSecondary, fontSize: 14, fontWeight: '600' as const },
+  emptyDesc: { color: Colors.dark.textMuted, fontSize: 12, textAlign: 'center' as const, lineHeight: 18, paddingHorizontal: 10 },
+  numbersGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  numberItem: { alignItems: 'center', width: 80 },
+  numberBadge: { backgroundColor: 'rgba(139,92,246,0.1)', borderWidth: 1.5, borderColor: 'rgba(139,92,246,0.3)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, width: 80, alignItems: 'center' },
+  numberText: { color: '#8B5CF6', fontSize: 18, fontWeight: '900' as const, letterSpacing: 2 },
+  numberSponsor: { color: Colors.dark.textSecondary, fontSize: 9, fontWeight: '600' as const, marginTop: 4, textAlign: 'center' as const },
+  numberDate: { color: Colors.dark.textMuted, fontSize: 9, marginTop: 1 },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(239,68,68,0.06)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.12)' },
+  clearBtnTxt: { color: Colors.dark.danger, fontSize: 12, fontWeight: '600' as const },
 });
