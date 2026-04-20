@@ -6,13 +6,15 @@ import { Image } from 'expo-image';
 import { MapPin, Phone, BadgeCheck, Navigation, Grid3x3, ShoppingBag, Heart, MessageCircle, Share2, MessageSquare } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useSponsor } from '@/providers/SponsorProvider';
+import { useUser } from '@/providers/UserProvider';
 import OfferDetailModal from '@/components/OfferDetailModal';
-import type { Offer, Sponsor } from '@/types';
+import type { Offer, SponsorImage } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const GRID_GAP = 2;
+const GRID_GAP = 8;
 const GRID_COLS = 3;
-const GRID_ITEM_SIZE = (SCREEN_W - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+const GRID_HORIZONTAL_PADDING = 12;
+const GRID_ITEM_SIZE = (SCREEN_W - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
 
 function openDirections(lat: number, lon: number, label: string) {
   const encoded = encodeURIComponent(label);
@@ -33,21 +35,52 @@ export default function SponsorDetailScreen() {
   console.log("[SponsorDetail] Sponsor detail initialized");
   const { sponsorId } = useLocalSearchParams<{ sponsorId: string }>();
   const router = useRouter();
-  const { sponsors } = useSponsor();
+  const { sponsors, toggleLikeOffer: rawToggleLike, shareOffer: rawShare, addOfferComment, isOfferLiked, isOfferShared } = useSponsor();
+  const { addPoints } = useUser();
   const sponsor = sponsors.find((s) => s.id === sponsorId);
+  const toggleLikeOffer = useCallback((offerId: string) => rawToggleLike(offerId, (pts) => addPoints(pts)), [rawToggleLike, addPoints]);
+  const shareOffer = useCallback((offerId: string) => rawShare(offerId, (pts) => addPoints(pts)), [rawShare, addPoints]);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
+  const [selectedOfferList, setSelectedOfferList] = useState<Offer[]>([]);
+  const [selectedOfferIndex, setSelectedOfferIndex] = useState<number>(0);
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'grid' | 'list'>('grid');
 
-  const handleOfferPress = useCallback((offer: Offer) => {
+  const handleOfferPress = useCallback((offer: Offer, index: number) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedOfferList(sponsor?.offers || []);
+    setSelectedOfferIndex(index);
     setSelectedOffer(offer);
     setModalVisible(true);
-  }, []);
+  }, [sponsor]);
+
+  const handleProductPress = useCallback((product: SponsorImage) => {
+    if (!sponsor) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const productOffers: Offer[] = (sponsor.galleryImages || []).map((item) => ({
+      id: item.id,
+      sponsorId: sponsor.id,
+      sponsorName: sponsor.name,
+      title: item.label || 'Produto da loja',
+      description: item.label ? `Produto: ${item.label}` : 'Produto da loja',
+      imageUrl: item.url,
+      discount: typeof item.price === 'number' ? `R$ ${item.price.toFixed(2)}` : '',
+      likes: item.likes || 0,
+      comments: item.comments || 0,
+      shares: item.shares || 0,
+    }));
+    const idx = Math.max(0, productOffers.findIndex((item) => item.id === product.id));
+    setSelectedOfferList(productOffers);
+    setSelectedOfferIndex(idx);
+    setSelectedOffer(productOffers[idx] || null);
+    setModalVisible(true);
+  }, [sponsor]);
 
   const handleCloseModal = useCallback(() => {
     setModalVisible(false);
     setSelectedOffer(null);
+    setSelectedOfferList([]);
+    setSelectedOfferIndex(0);
   }, []);
 
   const handleGoLocation = useCallback(() => {
@@ -55,6 +88,12 @@ export default function SponsorDetailScreen() {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     openDirections(sponsor.latitude, sponsor.longitude, sponsor.name);
   }, [sponsor]);
+
+  const handleOfferComment = useCallback((offer: Offer) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    addOfferComment(offer.id);
+    console.log('[SponsorDetail] Comment registered for offer:', offer.id);
+  }, [addOfferComment]);
 
   if (!sponsor) {
     return (
@@ -66,6 +105,7 @@ export default function SponsorDetailScreen() {
   }
 
   const totalLikes = sponsor.offers.reduce((sum, o) => sum + (o.likes || 0), 0);
+  const products = sponsor.galleryImages || [];
 
   return (
     <View style={d.ctr}>
@@ -108,6 +148,9 @@ export default function SponsorDetailScreen() {
             <Text style={d.bioDesc}>{sponsor.description}</Text>
             <View style={d.bioMeta}>
               <View style={d.metaRow}>
+                <TouchableOpacity style={d.inlineGoBtn} onPress={handleGoLocation} activeOpacity={0.8}>
+                  <Navigation size={16} color="#FFF" />
+                </TouchableOpacity>
                 <MapPin size={13} color={Colors.dark.textMuted} />
                 <Text style={d.metaTxt}>{sponsor.address}, {sponsor.city} - {sponsor.state}</Text>
               </View>
@@ -117,15 +160,6 @@ export default function SponsorDetailScreen() {
               </View>
             </View>
           </View>
-
-          <TouchableOpacity
-            style={d.locationBtn}
-            onPress={handleGoLocation}
-            activeOpacity={0.8}
-          >
-            <Navigation size={18} color="#000" />
-            <Text style={d.locationBtnTxt}>Ir para Local</Text>
-          </TouchableOpacity>
         </View>
 
         <View style={d.tabBar}>
@@ -146,24 +180,24 @@ export default function SponsorDetailScreen() {
         </View>
 
         {activeTab === 'grid' ? (
-          <View style={d.grid}>
-            {sponsor.offers.map((offer) => (
-              <TouchableOpacity key={offer.id} onPress={() => handleOfferPress(offer)} activeOpacity={0.85}>
-                <View style={d.gridItem}>
-                  <Image source={{ uri: offer.imageUrl }} style={d.gridImg} contentFit="cover" cachePolicy="memory-disk" />
-                  {offer.discount && (
-                    <View style={d.gridBadge}>
-                      <Text style={d.gridBadgeTxt}>{offer.discount}</Text>
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))}
+          <View>
+            <Text style={d.sectionTitle}>Produtos da Loja</Text>
+            {products.length > 0 ? (
+              <View style={d.grid}>
+                {products.map((product) => (
+                  <TouchableOpacity key={product.id} style={d.gridItem} onPress={() => handleProductPress(product)} activeOpacity={0.85}>
+                    <Image source={{ uri: product.url }} style={d.gridImg} contentFit="cover" cachePolicy="memory-disk" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={d.emptyProducts}>Este patrocinador ainda nao cadastrou produtos da loja.</Text>
+            )}
           </View>
         ) : (
           <View style={d.listView}>
-            {sponsor.offers.map((offer) => (
-              <TouchableOpacity key={offer.id} onPress={() => handleOfferPress(offer)} activeOpacity={0.9} style={d.postCard}>
+            {sponsor.offers.map((offer, offerIndex) => (
+              <TouchableOpacity key={offer.id} onPress={() => handleOfferPress(offer, offerIndex)} activeOpacity={0.9} style={d.postCard}>
                 <View style={d.postHeader}>
                   <Image source={{ uri: sponsor.logoUrl || sponsor.imageUrl }} style={d.postAvatar} contentFit="cover" cachePolicy="memory-disk" />
                   <View style={d.postHeaderInfo}>
@@ -174,13 +208,23 @@ export default function SponsorDetailScreen() {
                 <Image source={{ uri: offer.imageUrl }} style={d.postImage} contentFit="cover" cachePolicy="memory-disk" />
                 <View style={d.postActions}>
                   <View style={d.postActionsLeft}>
-                    <Heart size={24} color={Colors.dark.text} />
-                    <MessageCircle size={23} color={Colors.dark.text} />
-                    <Share2 size={22} color={Colors.dark.text} />
+                    <TouchableOpacity style={d.postActionBtn} onPress={() => toggleLikeOffer(offer.id)} activeOpacity={0.7}>
+                      <Heart
+                        size={24}
+                        color={isOfferLiked(offer.id) ? '#EF4444' : Colors.dark.text}
+                        fill={isOfferLiked(offer.id) ? '#EF4444' : 'transparent'}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={d.postActionBtn} onPress={() => handleOfferComment(offer)} activeOpacity={0.7}>
+                      <MessageCircle size={23} color={Colors.dark.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={d.postActionBtn} onPress={() => shareOffer(offer.id)} activeOpacity={0.7}>
+                      <Share2 size={22} color={isOfferShared(offer.id) ? Colors.dark.neonGreen : Colors.dark.text} />
+                    </TouchableOpacity>
                   </View>
                 </View>
                 <View style={d.postDetails}>
-                  <Text style={d.postLikes}>{(offer.likes || 0).toLocaleString('pt-BR')} curtidas</Text>
+                  <Text style={d.postLikes}>{(offer.likes || 0).toLocaleString('pt-BR')} curtidas • {offer.comments || 0} mensagens • {offer.shares || 0} compartilhamentos</Text>
                   <Text style={d.postCaption}>
                     <Text style={d.postCaptionBold}>{sponsor.name} </Text>
                     {offer.title}
@@ -217,6 +261,9 @@ export default function SponsorDetailScreen() {
       <OfferDetailModal
         visible={modalVisible}
         offer={selectedOffer}
+        sponsor={sponsor}
+        offerList={selectedOfferList}
+        initialIndex={selectedOfferIndex}
         onClose={handleCloseModal}
       />
     </View>
@@ -306,27 +353,26 @@ const d = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  metaTxt: {
-    fontSize: 13,
-    color: Colors.dark.textMuted,
-  },
-
-  locationBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.dark.neonGreen,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 14,
     gap: 8,
   },
-  locationBtnTxt: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: '700' as const,
+  metaTxt: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.dark.textMuted,
+    lineHeight: 18,
+  },
+  inlineGoBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F97316',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    elevation: 6,
   },
 
   tabBar: {
@@ -348,6 +394,21 @@ const d = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    paddingHorizontal: GRID_HORIZONTAL_PADDING,
+  },
+  sectionTitle: {
+    color: Colors.dark.text,
+    fontSize: 15,
+    fontWeight: '700' as const,
+    marginHorizontal: 12,
+    marginTop: 14,
+    marginBottom: 10,
+  },
+  emptyProducts: {
+    color: Colors.dark.textMuted,
+    fontSize: 13,
+    marginHorizontal: 12,
+    marginBottom: 14,
   },
   gridItem: {
     width: GRID_ITEM_SIZE,
@@ -355,11 +416,34 @@ const d = StyleSheet.create({
     position: 'relative' as const,
     marginRight: GRID_GAP,
     marginBottom: GRID_GAP,
+    borderRadius: 12,
+    overflow: 'hidden' as const,
   },
   gridImg: {
     width: '100%',
     height: '100%',
     backgroundColor: Colors.dark.surfaceLight,
+    borderRadius: 12,
+  },
+  productInfoWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  productLabel: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700' as const,
+  },
+  productPrice: {
+    color: Colors.dark.neonGreen,
+    fontSize: 10,
+    fontWeight: '800' as const,
+    marginTop: 1,
   },
   gridBadge: {
     position: 'absolute',
@@ -377,12 +461,17 @@ const d = StyleSheet.create({
   },
 
   listView: {
-    paddingTop: 0,
+    paddingTop: 6,
+    gap: 12,
   },
   postCard: {
     backgroundColor: Colors.dark.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.cardBorder,
+    marginHorizontal: 12,
+    marginBottom: 14,
+    borderRadius: 18,
+    overflow: 'hidden' as const,
+    borderWidth: 1,
+    borderColor: Colors.dark.cardBorder,
   },
   postHeader: {
     flexDirection: 'row',
@@ -426,6 +515,9 @@ const d = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
+  },
+  postActionBtn: {
+    paddingVertical: 2,
   },
   postDetails: {
     paddingHorizontal: 14,

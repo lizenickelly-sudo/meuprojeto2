@@ -110,6 +110,7 @@ export default function LoginScreen() {
 
   const displayError = localError || (isRegisterMode ? registerError : loginError);
   const isPending = isRegisterMode ? registerPending : loginPending;
+  const showLoginHelp = !isRegisterMode && !!displayError;
 
   return (
     <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -162,6 +163,14 @@ export default function LoginScreen() {
 
           {displayError && <View style={s.errorBox}><Text style={s.errorText}>{displayError}</Text></View>}
 
+          {showLoginHelp && (
+            <View style={s.helperBox}>
+              <Text style={s.helperText}>
+                Nao conseguiu entrar? Se ainda nao tem conta, toque em Criar conta. Se esqueceu a senha, toque em Esqueceu sua senha.
+              </Text>
+            </View>
+          )}
+
           {!isRegisterMode && (
             <TouchableOpacity style={s.forgotBtn} onPress={() => router.push('/forgot-password')} activeOpacity={0.7} testID="forgot-password-btn">
               <Text style={s.forgotText}>Esqueceu sua senha?</Text>
@@ -208,6 +217,8 @@ const s = StyleSheet.create({
   eyeBtn: { padding: 14 },
   errorBox: { backgroundColor: 'rgba(255,71,87,0.1)', borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,71,87,0.2)' },
   errorText: { color: '#FF4757', fontSize: 13, fontWeight: '500' as const, textAlign: 'center' as const },
+  helperBox: { backgroundColor: 'rgba(249,115,22,0.08)', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(249,115,22,0.2)' },
+  helperText: { color: Colors.dark.textMuted, fontSize: 12, textAlign: 'center' as const, lineHeight: 18 },
   forgotBtn: { alignSelf: 'flex-end' as const, marginBottom: 20, marginTop: -4 },
   forgotText: { color: Colors.dark.primary, fontSize: 13, fontWeight: '600' as const },
   submitBtn: { borderRadius: 14, overflow: 'hidden', marginBottom: 20 },

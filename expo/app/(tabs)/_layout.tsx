@@ -47,6 +47,7 @@ export default function TabLayout() {
           backgroundColor: '#FFFFFF',
           borderTopColor: 'rgba(0,0,0,0.06)',
           borderTopWidth: 1,
+          overflow: 'visible',
           elevation: 4,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
@@ -78,6 +79,9 @@ export default function TabLayout() {
         name="map"
         options={{
           title: "Ajuda",
+          tabBarItemStyle: {
+            zIndex: 30,
+          },
           tabBarIcon: () => (
             <View style={fab.wrapper}>
               <View style={fab.button}>
@@ -114,6 +118,8 @@ export default function TabLayout() {
 
 const fab = StyleSheet.create({
   wrapper: {
+    position: 'relative',
+    zIndex: 40,
     alignItems: 'center',
     justifyContent: 'center',
     top: -18,
@@ -121,6 +127,7 @@ const fab = StyleSheet.create({
     height: 60,
   },
   button: {
+    zIndex: 41,
     width: 56,
     height: 56,
     borderRadius: 28,

@@ -172,7 +172,37 @@ export interface AdminNotification {
   id: string;
   title: string;
   message: string;
-  type: 'general' | 'promo' | 'prize';
+  type: 'general' | 'promo' | 'prize' | 'identity_verification';
   createdAt: string;
   sent: boolean;
+  metadata?: {
+    kind?: 'lottery_claim' | 'identity_verification';
+    ticketId?: string;
+    drawId?: string;
+    lotteryCode?: string;
+    amount?: number;
+    userEmail?: string;
+    status?: 'requested' | 'confirmed';
+    confirmedAt?: string;
+    selfieUrl?: string;
+    documentUrl?: string;
+    cpf?: string;
+    identityVerified?: boolean;
+    verifiedAt?: string;
+    verificationStatus?: 'pending' | 'verified' | 'rejected';
+  };
+}
+
+export interface FederalLotteryResult {
+  id: string;
+  contest: string;
+  drawDate: string;
+  prizeNumbers: [string, string, string, string, string];
+}
+
+export interface ManagedCity {
+  id: string;
+  city: string;
+  state: string;
+  createdAt: string;
 }

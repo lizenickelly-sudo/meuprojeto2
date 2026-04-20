@@ -66,6 +66,9 @@ export default function ProfileScreen() {
   const { profile, saveProfile } = useUser();
   const { isAdmin, toggleAdmin, verifyAdminPin } = useAdmin();
   const { logout } = useAuth();
+  const isIdentityVerified = Boolean(
+    profile.identityVerified || (profile.selfieUrl && profile.documentUrl && profile.cpf)
+  );
 
   const isFieldLocked = useCallback((fieldName: string): boolean => {
     const value = profile[fieldName as keyof UserProfile];
@@ -244,10 +247,10 @@ export default function ProfileScreen() {
             <View style={s.profileInfoRight}>
               <Text style={s.profileName}>{profile.name || 'Visitante'}</Text>
               {profile.city ? <View style={s.locationRow}><MapPin size={13} color={Colors.dark.textSecondary} /><Text style={s.profileLocation}>{profile.city}, {profile.state}</Text></View> : <Text style={s.profileLocation}>Localização não definida</Text>}
-              {!ed && !profile.identityVerified && (
+              {!ed && !isIdentityVerified && (
                 <TouchableOpacity style={s.verifyBtn} onPress={() => router.push('/identity-verify')}><Shield size={13} color="#000" /><Text style={s.verifyBtnText}>Verificar</Text></TouchableOpacity>
               )}
-              {profile.identityVerified && <View style={s.verifiedInline}><BadgeCheck size={13} color={Colors.dark.success} /><Text style={s.verifiedInlineText}>Verificado</Text></View>}
+              {isIdentityVerified && <View style={s.verifiedInline}><BadgeCheck size={13} color={Colors.dark.success} /><Text style={s.verifiedInlineText}>Verificado</Text></View>}
             </View>
           </View>
         </View>
@@ -300,8 +303,8 @@ export default function ProfileScreen() {
           <View style={s.sectionHeader}><Shield size={18} color={Colors.dark.primary} /><Text style={s.sectionTitle}>Segurança</Text></View>
           <View style={s.sectionBody}>
             <View style={s.securityRow}>
-              <View style={s.securityInfo}><Text style={s.securityLabel}>Verificação de Identidade</Text><Text style={s.securityDesc}>{profile.identityVerified ? 'Conta verificada' : 'Verifique para sacar'}</Text></View>
-              {profile.identityVerified ? <View style={s.verifiedTag}><BadgeCheck size={14} color={Colors.dark.success} /><Text style={s.verifiedTagText}>Verificado</Text></View> : <TouchableOpacity style={s.verifyActionBtn} onPress={() => router.push('/identity-verify')}><Text style={s.verifyActionText}>Verificar</Text></TouchableOpacity>}
+              <View style={s.securityInfo}><Text style={s.securityLabel}>Verificação de Identidade</Text><Text style={s.securityDesc}>{isIdentityVerified ? 'Conta verificada' : 'Verifique para sacar'}</Text></View>
+              {isIdentityVerified ? <View style={s.verifiedTag}><BadgeCheck size={14} color={Colors.dark.success} /><Text style={s.verifiedTagText}>Verificado</Text></View> : <TouchableOpacity style={s.verifyActionBtn} onPress={() => router.push('/identity-verify')}><Text style={s.verifyActionText}>Verificar</Text></TouchableOpacity>}
             </View>
           </View>
         </View>

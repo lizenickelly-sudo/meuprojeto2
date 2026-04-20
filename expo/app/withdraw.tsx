@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, KeyboardAvoidingView, Animated } from 'react-native';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, KeyboardAvoidingView, Animated, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import { DollarSign, CheckCircle, AlertTriangle, XCircle } from 'lucide-react-native';
+import { DollarSign, CheckCircle, AlertTriangle, XCircle, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useUser } from '@/providers/UserProvider';
@@ -16,6 +16,33 @@ export default function WithdrawScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const errorOpacity = useRef(new Animated.Value(0)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
+
+  const pixKeyLabel = (type: string) => {
+    const labels: Record<string, string> = { cpf: 'CPF', phone: 'Telefone', email: 'E-mail', random: 'Chave Aleatória' };
+    return labels[type] ?? type;
+  };
+
+  const availableKeys = useMemo(() => {
+    const keys: Array<{ type: string; value: string; label: string }> = [];
+    if (profile.pixKeys && profile.pixKeys.length > 0) {
+      profile.pixKeys.forEach((k) => keys.push({ type: k.type, value: k.value, label: pixKeyLabel(k.type) }));
+    } else {
+      if (profile.pixCpf) keys.push({ type: 'cpf', value: profile.pixCpf, label: 'CPF' });
+      if (profile.pixPhone) keys.push({ type: 'phone', value: profile.pixPhone, label: 'Telefone' });
+      if (profile.pixEmail) keys.push({ type: 'email', value: profile.pixEmail, label: 'E-mail' });
+      if (profile.pixRandom) keys.push({ type: 'random', value: profile.pixRandom, label: 'Chave Aleatória' });
+      if (profile.pixKey && keys.length === 0) keys.push({ type: profile.pixKeyType ?? 'random', value: profile.pixKey, label: pixKeyLabel(profile.pixKeyType ?? 'random') });
+    }
+    return keys;
+  }, [profile]);
+
+  const [selectedPixKey, setSelectedPixKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (availableKeys.length > 0 && selectedPixKey === null) {
+      setSelectedPixKey(availableKeys[0].value);
+    }
+  }, [availableKeys, selectedPixKey]);
 
   const showError = useCallback((msg: string) => {
     setErrorMsg(msg);
@@ -46,12 +73,12 @@ export default function WithdrawScreen() {
     if (isNaN(val) || val <= 0) { showError('Informe um valor válido para saque'); return; }
     if (val < 1) { showError('O valor mínimo para saque é R$ 1,00'); return; }
     if (val > balance) { showError(`Saldo insuficiente. Seu saldo é R$ ${balance.toFixed(2)}`); return; }
-    if (!profile.pixKey) { showError('Cadastre sua chave PIX no perfil antes de sacar'); return; }
+    if (!selectedPixKey) { showError('Selecione uma chave PIX para sacar'); return; }
     if (!profile.identityVerified) { showError('Verifique sua identidade antes de sacar'); return; }
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    withdraw(val);
+    withdraw(val, selectedPixKey);
     setSuccess(true);
-  }, [amount, balance, profile, withdraw, showError, clearError]);
+  }, [amount, balance, selectedPixKey, profile, withdraw, showError, clearError]);
 
   const quickAmounts = [10, 25, 50, 100];
 
@@ -64,7 +91,7 @@ export default function WithdrawScreen() {
           <Text style={w.successTtl}>Saque Solicitado!</Text>
           <Text style={w.successVal}>R$ {parseFloat(amount).toFixed(2)}</Text>
           <Text style={w.successDesc}>O PIX sera enviado para sua chave cadastrada em ate 24 horas.</Text>
-          <Text style={w.successPix}>Chave: {profile.pixKey}</Text>
+          <Text style={w.successPix}>Chave: {selectedPixKey ?? profile.pixKey}</Text>
           <TouchableOpacity style={w.successBtn} onPress={() => router.back()} activeOpacity={0.8}>
             <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={w.successBtnG}>
               <Text style={w.successBtnT}>VOLTAR</Text>
@@ -105,10 +132,35 @@ export default function WithdrawScreen() {
           ))}
         </View>
 
-        {profile.pixKey ? (
-          <View style={w.pixInfo}><DollarSign size={16} color={Colors.dark.neonGreen} /><Text style={w.pixTxt}>PIX: {profile.pixKey}</Text></View>
+        {availableKeys.length > 0 ? (
+          <View style={w.pixSection}>
+            <Text style={w.pixSectionLabel}>Chave PIX para receber</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={w.pixKeyScroll} contentContainerStyle={w.pixKeyScrollContent}>
+              {availableKeys.map((key) => {
+                const isSelected = selectedPixKey === key.value;
+                return (
+                  <TouchableOpacity
+                    key={key.value}
+                    style={[w.pixKeyChip, isSelected && w.pixKeyChipSelected]}
+                    onPress={() => setSelectedPixKey(key.value)}
+                    activeOpacity={0.75}
+                  >
+                    <DollarSign size={13} color={isSelected ? '#000' : Colors.dark.neonGreen} />
+                    <View>
+                      <Text style={[w.pixKeyChipType, isSelected && w.pixKeyChipTypeSelected]}>{key.label}</Text>
+                      <Text style={[w.pixKeyChipVal, isSelected && w.pixKeyChipValSelected]} numberOfLines={1}>{key.value}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
         ) : (
-          <View style={w.pixWarn}><Text style={w.pixWarnTxt}>Cadastre sua chave PIX no perfil</Text></View>
+          <TouchableOpacity style={w.pixWarn} onPress={() => router.push('/(tabs)/profile')} activeOpacity={0.8}>
+            <AlertTriangle size={16} color={Colors.dark.warning} />
+            <Text style={w.pixWarnTxt}>Nenhuma chave PIX cadastrada</Text>
+            <View style={w.pixWarnAction}><Text style={w.pixWarnActionTxt}>Configurar no Perfil</Text><ChevronRight size={14} color={Colors.dark.neonGreen} /></View>
+          </TouchableOpacity>
         )}
 
         {errorMsg && (
@@ -120,16 +172,16 @@ export default function WithdrawScreen() {
         )}
 
         <TouchableOpacity
-          style={[w.btn, (!profile.pixKey || !profile.identityVerified) && w.btnDisabled]}
+          style={[w.btn, (!selectedPixKey || !profile.identityVerified) && w.btnDisabled]}
           onPress={handleWithdraw} activeOpacity={0.8}
-          disabled={withdrawPending || !profile.pixKey || !profile.identityVerified} testID="withdraw-btn"
+          disabled={withdrawPending || !selectedPixKey || !profile.identityVerified} testID="withdraw-btn"
         >
           <LinearGradient
-            colors={(!profile.pixKey || !profile.identityVerified) ? [Colors.dark.textMuted, Colors.dark.textMuted] : [Colors.dark.neonGreen, Colors.dark.neonGreenDim]}
+            colors={(!selectedPixKey || !profile.identityVerified) ? [Colors.dark.textMuted, Colors.dark.textMuted] : [Colors.dark.neonGreen, Colors.dark.neonGreenDim]}
             style={w.btnG}
           >
-            <DollarSign size={18} color={(!profile.pixKey || !profile.identityVerified) ? Colors.dark.background : '#000'} />
-            <Text style={[w.btnT, (!profile.pixKey || !profile.identityVerified) && { color: Colors.dark.background }]}>
+            <DollarSign size={18} color={(!selectedPixKey || !profile.identityVerified) ? Colors.dark.background : '#000'} />
+            <Text style={[w.btnT, (!selectedPixKey || !profile.identityVerified) && { color: Colors.dark.background }]}>
               {withdrawPending ? 'PROCESSANDO...' : 'SACAR VIA PIX'}
             </Text>
           </LinearGradient>
@@ -158,8 +210,20 @@ const w = StyleSheet.create({
   quickTxtOn: { color: Colors.dark.neonGreen },
   pixInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.dark.neonGreenFaint, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.dark.neonGreenBorder, marginBottom: 24 },
   pixTxt: { color: Colors.dark.neonGreen, fontSize: 13, fontWeight: '600' as const },
-  pixWarn: { backgroundColor: 'rgba(255,71,87,0.08)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(255,71,87,0.2)', marginBottom: 24, alignItems: 'center' },
-  pixWarnTxt: { color: Colors.dark.danger, fontSize: 13, fontWeight: '600' as const },
+  pixWarn: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, backgroundColor: 'rgba(255,190,11,0.08)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(255,190,11,0.2)', marginBottom: 24 },
+  pixWarnTxt: { color: Colors.dark.warning, fontSize: 13, fontWeight: '600' as const, flex: 1 },
+  pixWarnAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  pixWarnActionTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '700' as const },
+  pixSection: { marginBottom: 24 },
+  pixSectionLabel: { color: Colors.dark.textSecondary, fontSize: 13, fontWeight: '600' as const, marginBottom: 10 },
+  pixKeyScroll: { flexGrow: 0 },
+  pixKeyScrollContent: { gap: 10, paddingRight: 4 },
+  pixKeyChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.dark.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1.5, borderColor: Colors.dark.neonGreenBorder },
+  pixKeyChipSelected: { backgroundColor: Colors.dark.neonGreen, borderColor: Colors.dark.neonGreen },
+  pixKeyChipType: { color: Colors.dark.neonGreen, fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' as const },
+  pixKeyChipTypeSelected: { color: '#000' },
+  pixKeyChipVal: { color: Colors.dark.text, fontSize: 13, fontWeight: '600' as const, maxWidth: 160 },
+  pixKeyChipValSelected: { color: '#000' },
   errorBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,71,87,0.1)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(255,71,87,0.25)', marginBottom: 16 },
   errorTxt: { color: Colors.dark.danger, fontSize: 13, fontWeight: '600' as const, flex: 1 },
   btn: { borderRadius: 14, overflow: 'hidden', shadowColor: '#00FF87', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },

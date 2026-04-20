@@ -49,6 +49,7 @@ import {
   Globe,
   Building2,
   Map,
+  Eye,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
@@ -56,13 +57,15 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import Colors from '@/constants/colors';
+import { CITIES_BY_STATE, STATES } from '@/mocks/cities';
 import { useAdmin } from '@/providers/AdminProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useCoupon } from '@/providers/CouponProvider';
+import { useUser } from '@/providers/UserProvider';
 import { mockWinners, mockGrandPrize } from '@/mocks/winners';
 import { hasTableMissingError, hasConfigError } from '@/services/database';
 import { Database, Sprout, AlertTriangle } from 'lucide-react-native';
-import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, GrandPrize, PromotionalQR } from '@/types';
+import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, GrandPrize, PromotionalQR, ManagedCity } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -673,6 +676,15 @@ const fm = StyleSheet.create({
   saveFullBtn: { borderRadius: 14, overflow: 'hidden', marginTop: 4, shadowColor: "#00FF87", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
   saveFullGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8 },
   saveFullTxt: { color: '#000', fontSize: 15, fontWeight: '800' as const, letterSpacing: 0.5 },
+  photoPreviewContainer: { width: '100%', height: 160, borderRadius: 12, overflow: 'hidden', backgroundColor: Colors.dark.inputBg, marginBottom: 12 },
+  photoPreview: { width: '100%', height: '100%' },
+  changePhotoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: Colors.dark.surfaceLight, paddingVertical: 10, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  changePhotoBtnTxt: { color: Colors.dark.text, fontSize: 13, fontWeight: '600' as const },
+  photoPlaceholder: { minHeight: 160, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 8, backgroundColor: Colors.dark.inputBg, borderRadius: 12, paddingVertical: 24, marginBottom: 12 },
+  photoPlaceholderTxt: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '500' as const },
+  addPhotoBtn: { borderRadius: 12, overflow: 'hidden' as const },
+  addPhotoBtnGrad: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, paddingVertical: 12, gap: 6 },
+  addPhotoBtnTxt: { color: '#000', fontSize: 13, fontWeight: '700' as const },
   locationBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint },
   locationBtnText: { color: Colors.dark.neonGreen, fontSize: 14, fontWeight: '600' as const },
   locationInfo: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 8 },
@@ -857,11 +869,13 @@ function CouponBatchModal({
   onClose,
   sponsors,
   onGenerate,
+  onRequestPreview,
 }: {
   visible: boolean;
   onClose: () => void;
   sponsors: Sponsor[];
   onGenerate: (batch: CouponBatch) => void;
+  onRequestPreview?: (batch: CouponBatch) => void;
 }) {
   const insets = useSafeAreaInsets();
   const [selectedSponsor, setSelectedSponsor] = useState<string>('');
@@ -871,17 +885,12 @@ function CouponBatchModal({
 
   const selectedSponsorObj = sponsors.find((s) => s.id === selectedSponsor);
 
-  const generateLotteryNumber = useCallback(() => {
-    return Math.floor(10000 + Math.random() * 90000).toString();
-  }, []);
-
   const buildPrefix = useCallback((sponsor: Sponsor | undefined) => {
     if (!sponsor) return '';
     const stateCode = sponsor.state.toUpperCase().substring(0, 2);
-    const cityCode = sponsor.city.toUpperCase().replace(/\s+/g, '').substring(0, 3);
-    const lottery = generateLotteryNumber();
-    return `${stateCode}-${cityCode}-${lottery}`;
-  }, [generateLotteryNumber]);
+    const cityName = sponsor.city.charAt(0).toUpperCase() + sponsor.city.slice(1).toLowerCase();
+    return `${stateCode}-${cityName}`;
+  }, []);
 
   const generatedPrefix = useMemo(() => buildPrefix(selectedSponsorObj), [selectedSponsorObj, buildPrefix]);
 
@@ -901,10 +910,11 @@ function CouponBatchModal({
       return;
     }
     const codes: string[] = [];
+    const pfx = buildPrefix(selectedSponsorObj);
     for (let i = 0; i < qty; i++) {
-      const pfx = buildPrefix(selectedSponsorObj);
-      const seq = String(i + 1).padStart(3, '0');
-      const code = `${pfx}-${seq}`;
+      // Gerar 5 dígitos aleatórios para cada cupom
+      const randomDigits = String(Math.floor(10000 + Math.random() * 90000));
+      const code = `${pfx}-${randomDigits}`;
       codes.push(code);
     }
     const batch: CouponBatch = {
@@ -919,11 +929,11 @@ function CouponBatchModal({
     };
     onGenerate(batch);
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert('Sucesso', `${qty} cupons gerados para ${selectedSponsorObj?.name}!\n\nDeseja imprimir os cupons agora?`, [
-      { text: 'Depois', style: 'cancel' },
-      { text: 'Imprimir', onPress: () => printBatchCoupons(batch) },
+    Alert.alert('Sucesso', `${qty} cupons gerados para ${selectedSponsorObj?.name}!`, [
+      { text: 'Depois', style: 'cancel', onPress: () => onClose() },
+      { text: 'Visualizar', onPress: () => { if (onRequestPreview) onRequestPreview(batch); onClose(); } },
+      { text: 'Imprimir', onPress: () => { printBatchCoupons(batch); onClose(); } },
     ]);
-    onClose();
   }, [selectedSponsor, quantity, value, selectedSponsorObj, generatedPrefix, buildPrefix, onGenerate, onClose]);
 
   const printBatchCoupons = useCallback(async (batch: CouponBatch) => {
@@ -1024,6 +1034,223 @@ function CouponBatchModal({
     </Modal>
   );
 }
+
+function CouponPreviewModal({
+  visible,
+  batch,
+  onClose,
+  onPrint,
+}: {
+  visible: boolean;
+  batch: CouponBatch | null;
+  onClose: () => void;
+  onPrint: (batch: CouponBatch) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  if (!batch) return null;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[cp.container, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+        <View style={cp.header}>
+          <TouchableOpacity onPress={onClose} style={cp.closeBtn}>
+            <X size={22} color={Colors.dark.text} />
+          </TouchableOpacity>
+          <Text style={cp.headerTitle}>Visualizar Cupons</Text>
+          <TouchableOpacity style={cp.printBtn} onPress={() => { onPrint(batch); onClose(); }} activeOpacity={0.7}>
+            <Printer size={18} color={Colors.dark.neonGreen} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={cp.infoBar}>
+          <View style={cp.infoPart}>
+            <Text style={cp.infoLabel}>Loja</Text>
+            <Text style={cp.infoValue}>{batch.sponsorName}</Text>
+          </View>
+          <View style={cp.infoDivider} />
+          <View style={cp.infoPart}>
+            <Text style={cp.infoLabel}>Preço</Text>
+            <Text style={cp.infoValue}>R$ {batch.value.toFixed(2)}</Text>
+          </View>
+          <View style={cp.infoDivider} />
+          <View style={cp.infoPart}>
+            <Text style={cp.infoLabel}>Total</Text>
+            <Text style={cp.infoValue}>{batch.quantity}</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={cp.list}>
+          {batch.codes.map((code, i) => {
+            const qrData = encodeURIComponent(generateQRCodePayload(batch, code));
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}&format=png&margin=2`;
+            return (
+              <View key={`${code}-${i}`} style={cp.couponPreview}>
+                <View style={cp.couponNum}>
+                  <Text style={cp.couponNumText}>#{String(i + 1).padStart(3, '0')}</Text>
+                </View>
+                <View style={cp.couponQRWrapper}>
+                  <Image
+                    source={{ uri: qrUrl }}
+                    style={cp.couponQR}
+                    contentFit="contain"
+                  />
+                </View>
+                <View style={cp.couponInfo}>
+                  <Text style={cp.couponCode}>{code}</Text>
+                  <Text style={cp.couponValue}>R$ {batch.value.toFixed(2)}</Text>
+                </View>
+                <TouchableOpacity
+                  style={cp.copyBtn}
+                  onPress={() => {
+                    if (Platform.OS !== 'web') {
+                      Clipboard.setStringAsync(code);
+                      Alert.alert('Copiado', 'Código copiado para a área de transferência');
+                    }
+                  }}
+                >
+                  <Copy size={16} color={Colors.dark.neonGreen} />
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const cp = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.dark.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.dark.surface, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
+  closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: Colors.dark.text, fontSize: 16, fontWeight: '700' as const, flex: 1, textAlign: 'center' as const },
+  printBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  infoBar: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.dark.card, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 12 },
+  infoPart: { flex: 1, alignItems: 'center' as const },
+  infoLabel: { color: Colors.dark.textMuted, fontSize: 11, fontWeight: '600' as const, marginBottom: 2 },
+  infoValue: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
+  infoDivider: { width: 1, backgroundColor: Colors.dark.cardBorder },
+  list: { paddingHorizontal: 12, paddingVertical: 12, gap: 10 },
+  couponPreview: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: Colors.dark.card, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  couponNum: { width: 40, alignItems: 'center' as const, justifyContent: 'center' as const },
+  couponNumText: { color: Colors.dark.textMuted, fontSize: 11, fontWeight: '700' as const },
+  couponQRWrapper: { width: 70, height: 70, backgroundColor: Colors.dark.inputBg, borderRadius: 8, overflow: 'hidden' as const, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint },
+  couponQR: { width: '100%', height: '100%' },
+  couponInfo: { flex: 1, gap: 4 },
+  couponCode: { color: Colors.dark.text, fontSize: 12, fontWeight: '700' as const, fontFamily: 'monospace' },
+  couponValue: { color: Colors.dark.neonGreen, fontSize: 11, fontWeight: '600' as const },
+  copyBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: Colors.dark.surfaceLight },
+  codeItem: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: Colors.dark.card, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  codeNumber: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '600' as const, minWidth: 32 },
+  codeBox: { flex: 1, backgroundColor: Colors.dark.inputBg, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint, borderStyle: 'dashed' as const },
+  codeText: { color: Colors.dark.text, fontSize: 13, fontWeight: '700' as const, fontFamily: 'monospace' },
+});
+
+function PromoQRPreviewModal({
+  visible,
+  promo,
+  onClose,
+  onPrint,
+}: {
+  visible: boolean;
+  promo: PromotionalQR | null;
+  onClose: () => void;
+  onPrint: (promo: PromotionalQR) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  if (!promo) return null;
+
+  const qrData = encodeURIComponent(JSON.stringify({
+    type: 'cashbox_promo',
+    promoId: promo.id,
+    sponsorId: promo.sponsorId,
+    sponsorName: promo.sponsorName,
+    sponsorAddress: promo.sponsorAddress,
+    message: promo.message,
+    couponValue: promo.couponValue,
+    minPurchase: promo.minPurchase,
+    city: promo.city,
+    state: promo.state,
+  }));
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${qrData}&format=png&margin=8`;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[pqm.container, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+        <View style={pqm.header}>
+          <TouchableOpacity onPress={onClose} style={pqm.closeBtn}>
+            <X size={22} color={Colors.dark.text} />
+          </TouchableOpacity>
+          <Text style={pqm.headerTitle}>QR Code Promocional</Text>
+          <TouchableOpacity style={pqm.printBtn} onPress={() => { onPrint(promo); onClose(); }} activeOpacity={0.7}>
+            <Printer size={18} color="#F59E0B" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={pqm.content}>
+          <View style={pqm.infoSection}>
+            <Text style={pqm.storeName}>{promo.sponsorName}</Text>
+            {promo.sponsorAddress && <Text style={pqm.storeAddr}>{promo.sponsorAddress}</Text>}
+            <Text style={pqm.storeValue}>Pix R$ {promo.couponValue.toFixed(2)} | Compra min R$ {promo.minPurchase.toFixed(2)}</Text>
+          </View>
+
+          <View style={pqm.qrWrapper}>
+            <Image
+              source={{ uri: qrUrl }}
+              style={pqm.qrImage}
+              contentFit="contain"
+            />
+          </View>
+
+          <View style={pqm.messageSection}>
+            <Text style={pqm.messageLabel}>Mensagem Promocional:</Text>
+            <Text style={pqm.messageText}>
+              {promo.message || `Parabéns! Quer ganhar 1 Pix de R$ ${promo.couponValue.toFixed(2)}? Vá até a loja ${promo.sponsorName} e faça uma compra mínima de R$ ${promo.minPurchase.toFixed(2)} e ganhe um cupom para receber um Pix de R$ ${promo.couponValue.toFixed(2)}!`}
+            </Text>
+          </View>
+
+          <View style={pqm.instructionSection}>
+            <Text style={pqm.instructionText}>📱 Escaneie com o app CashBox PIX para ver a promoção</Text>
+          </View>
+
+          <TouchableOpacity 
+            style={pqm.printFullBtn} 
+            onPress={() => { onPrint(promo); onClose(); }} 
+            activeOpacity={0.8}
+          >
+            <LinearGradient colors={['#F59E0B', '#D97706']} style={pqm.printFullGrad}>
+              <Printer size={16} color="#000" />
+              <Text style={pqm.printFullTxt}>IMPRIMIR QR CODE</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const pqm = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.dark.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.dark.surface, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
+  closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: Colors.dark.text, fontSize: 16, fontWeight: '700' as const, flex: 1, textAlign: 'center' as const },
+  printBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(245, 158, 11, 0.1)', alignItems: 'center', justifyContent: 'center' },
+  content: { paddingHorizontal: 16, paddingVertical: 20, gap: 16 },
+  infoSection: { backgroundColor: Colors.dark.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  storeName: { color: Colors.dark.text, fontSize: 18, fontWeight: '700' as const },
+  storeAddr: { color: Colors.dark.textMuted, fontSize: 13, marginTop: 4 },
+  storeValue: { color: '#F59E0B', fontSize: 14, fontWeight: '700' as const, marginTop: 8, backgroundColor: 'rgba(245, 158, 11, 0.08)', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
+  qrWrapper: { backgroundColor: Colors.dark.card, borderRadius: 14, padding: 20, borderWidth: 1, borderColor: Colors.dark.cardBorder, alignItems: 'center' as const, minHeight: 320 },
+  qrImage: { width: 280, height: 280 },
+  messageSection: { backgroundColor: Colors.dark.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  messageLabel: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '600' as const, marginBottom: 8 },
+  messageText: { color: Colors.dark.text, fontSize: 13, lineHeight: 1.6 },
+  instructionSection: { backgroundColor: 'rgba(245, 158, 11, 0.08)', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.2)' },
+  instructionText: { color: '#F59E0B', fontSize: 13, fontWeight: '600' as const, textAlign: 'center' as const },
+  printFullBtn: { borderRadius: 12, overflow: 'hidden', marginTop: 8, marginBottom: 20, shadowColor:'#F59E0B', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  printFullGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
+  printFullTxt: { color: '#000', fontSize: 14, fontWeight: '800' as const, letterSpacing: 0.5 },
+});
 
 const bm = StyleSheet.create({
   pickerList: { backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, marginTop: 8, overflow: 'hidden' },
@@ -1163,6 +1390,10 @@ export default function AdminPanel() {
     updatePromoQR,
     deletePromoQR,
     getPromoQRsByCity,
+    managedCities,
+    addManagedCity,
+    verifyIdentity,
+    getPendingIdentityVerifications,
   } = useAdmin();
   const {
     sponsors,
@@ -1179,6 +1410,7 @@ export default function AdminPanel() {
     couponsBySponsor,
     addCouponRaw,
   } = useCoupon();
+  const { creditUserBalance } = useUser();
 
   const [mainTab, setMainTab] = useState<MainTab>('overview');
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
@@ -1188,10 +1420,14 @@ export default function AdminPanel() {
   const [showSponsorModal, setShowSponsorModal] = useState<boolean>(false);
   const [editingSponsor, setEditingSponsor] = useState<Sponsor | null>(null);
   const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
+  const [previewBatch, setPreviewBatch] = useState<CouponBatch | null>(null);
+  const [showCouponPreview, setShowCouponPreview] = useState<boolean>(false);
   const [showNotifModal, setShowNotifModal] = useState<boolean>(false);
   const [editingNotif, setEditingNotif] = useState<AdminNotification | null>(null);
   const [editingPromo, setEditingPromo] = useState<PromotionalQR | null>(null);
   const [showPromoForm, setShowPromoForm] = useState<boolean>(false);
+  const [previewPromoQR, setPreviewPromoQR] = useState<PromotionalQR | null>(null);
+  const [showPromoQRPreview, setShowPromoQRPreview] = useState<boolean>(false);
   const [promoForm, setPromoForm] = useState<{ sponsorId: string; sponsorName: string; sponsorAddress: string; message: string; couponValue: string; minPurchase: string }>({
     sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100',
   });
@@ -1200,6 +1436,29 @@ export default function AdminPanel() {
 
   const [couponFilterTab, setCouponFilterTab] = useState<'all' | 'active' | 'used' | 'sponsor'>('all');
   const [selectedCouponSponsor, setSelectedCouponSponsor] = useState<string>('');
+  const [showAddCityModal, setShowAddCityModal] = useState<boolean>(false);
+  const [newCityName, setNewCityName] = useState<string>('');
+  const [newCityState, setNewCityState] = useState<string>('SP');
+  const [showStatePicker, setShowStatePicker] = useState<boolean>(false);
+  const [showCityPicker, setShowCityPicker] = useState<boolean>(false);
+  const [newCityPhotoUri, setNewCityPhotoUri] = useState<string | null>(null);
+  const [cityHeaderImageError, setCityHeaderImageError] = useState<boolean>(false);
+
+  const suggestedCities = useMemo(() => {
+    return CITIES_BY_STATE[newCityState] ?? [];
+  }, [newCityState]);
+
+  const getCityImageUri = useCallback((city: string | null) => {
+    if (!city) return null;
+    const raw = cityImages[city];
+    if (!raw) return null;
+    const uri = raw.trim();
+    if (!uri) return null;
+    if (uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('file://') || uri.startsWith('data:image/')) {
+      return uri;
+    }
+    return null;
+  }, [cityImages]);
 
   const cities = useMemo(() => {
     const cityMap: Record<string, { city: string; state: string; count: number }> = {};
@@ -1208,8 +1467,12 @@ export default function AdminPanel() {
       if (!cityMap[key]) cityMap[key] = { city: s.city, state: s.state, count: 0 };
       cityMap[key].count++;
     });
+    managedCities.forEach((c) => {
+      const key = `${c.city}|${c.state}`;
+      if (!cityMap[key]) cityMap[key] = { city: c.city, state: c.state, count: 0 };
+    });
     return Object.values(cityMap).sort((a, b) => a.city.localeCompare(b.city));
-  }, [sponsors]);
+  }, [sponsors, managedCities]);
 
   const states = useMemo(() => {
     const stateMap: Record<string, { state: string; cities: string[]; count: number }> = {};
@@ -1218,8 +1481,12 @@ export default function AdminPanel() {
       if (!stateMap[s.state].cities.includes(s.city)) stateMap[s.state].cities.push(s.city);
       stateMap[s.state].count++;
     });
+    managedCities.forEach((c) => {
+      if (!stateMap[c.state]) stateMap[c.state] = { state: c.state, cities: [], count: 0 };
+      if (!stateMap[c.state].cities.includes(c.city)) stateMap[c.state].cities.push(c.city);
+    });
     return Object.values(stateMap).sort((a, b) => a.state.localeCompare(b.state));
-  }, [sponsors]);
+  }, [sponsors, managedCities]);
 
   const citySponsors = useMemo(() => {
     if (!selectedCity) return [];
@@ -1258,6 +1525,10 @@ export default function AdminPanel() {
       setPrizeLotteryRef(prize?.lotteryReference ?? 'Loteria Federal');
     }
   }, [selectedCity, getCityPrize, grandPrizeConfig]);
+
+  React.useEffect(() => {
+    setCityHeaderImageError(false);
+  }, [selectedCity]);
 
   const sponsorFormData = useMemo((): SponsorFormData => {
     if (editingSponsor) {
@@ -1337,6 +1608,12 @@ export default function AdminPanel() {
       stories: editingSponsor?.stories ?? [],
       galleryImages: data.galleryImages,
     };
+    addManagedCity({
+      id: `city_${Date.now()}`,
+      city: sponsorData.city,
+      state: sponsorData.state,
+      createdAt: new Date().toISOString(),
+    });
     if (editingSponsor) {
       updateSponsor(sponsorData);
       Alert.alert('Sucesso', `${sponsorData.name} atualizado!`);
@@ -1346,7 +1623,43 @@ export default function AdminPanel() {
     }
     setShowSponsorModal(false);
     setEditingSponsor(null);
-  }, [editingSponsor, updateSponsor, addSponsor]);
+  }, [editingSponsor, updateSponsor, addSponsor, addManagedCity]);
+
+  const handleSaveManagedCity = useCallback(() => {
+    const city = newCityName.trim();
+    const state = newCityState.trim().toUpperCase();
+    if (!city) {
+      Alert.alert('Erro', 'Informe o nome da cidade');
+      return;
+    }
+    if (state.length !== 2) {
+      Alert.alert('Erro', 'Informe a UF com 2 letras');
+      return;
+    }
+    const exists = cities.some((c) => c.city.toLowerCase() === city.toLowerCase() && c.state.toUpperCase() === state);
+    if (exists) {
+      Alert.alert('Aviso', 'Esta cidade ja esta cadastrada');
+      return;
+    }
+    const created: ManagedCity = {
+      id: `city_${Date.now()}`,
+      city,
+      state,
+      createdAt: new Date().toISOString(),
+    };
+    addManagedCity(created);
+    // Salvar foto se foi escolhida
+    if (newCityPhotoUri) {
+      saveCityImage(city, newCityPhotoUri);
+    }
+    setShowAddCityModal(false);
+    setNewCityName('');
+    setNewCityState('SP');
+    setNewCityPhotoUri(null);
+    setSelectedCity(city);
+    setCitySubTab('prize');
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }, [newCityName, newCityState, cities, addManagedCity, newCityPhotoUri, saveCityImage]);
 
   const handleDeleteSponsor = useCallback((sponsor: Sponsor) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1398,6 +1711,19 @@ export default function AdminPanel() {
     }
   }, [saveCityImage]);
 
+  const handlePickNewCityPhoto = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setNewCityPhotoUri(result.assets[0].uri);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, []);
+
   const handlePickPrizeBg = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -1437,6 +1763,112 @@ export default function AdminPanel() {
       { text: 'Enviar', onPress: () => { updateNotification({ ...notif, sent: true }); Alert.alert('Enviado', 'Notificacao enviada!'); } },
     ]);
   }, [updateNotification]);
+
+  const isLotteryClaimNotification = useCallback((notif: AdminNotification) => {
+    return notif.type === 'prize' && notif.metadata?.kind === 'lottery_claim' && notif.metadata?.status === 'requested';
+  }, []);
+
+  const isIdentityVerificationNotification = useCallback((notif: AdminNotification) => {
+    return notif.type === 'identity_verification' && notif.metadata?.kind === 'identity_verification' && notif.metadata?.verificationStatus === 'pending';
+  }, []);
+
+  const handleVerifyIdentity = useCallback((notif: AdminNotification) => {
+    const metadata = notif.metadata;
+    const userEmail = metadata?.userEmail ?? '';
+    const cpf = metadata?.cpf ?? '';
+
+    if (!userEmail || !cpf) {
+      Alert.alert('Dados incompletos', 'Esta solicitacao nao possui os dados necessarios para verificacao.');
+      return;
+    }
+
+    Alert.alert(
+      'Verificar identidade',
+      `Confirmar verificacao de identidade para ${userEmail}?\n\nCPF: ${cpf}`,
+      [
+        { text: 'Rejeitar', onPress: () => {
+          verifyIdentity(notif.id, userEmail, false);
+          console.log('[Admin] Identity verification rejected for:', userEmail);
+          Alert.alert('Rejeitado', 'Verificacao de identidade rejeitada.');
+          updateNotification({
+            ...notif,
+            metadata: {
+              ...metadata,
+              verificationStatus: 'rejected',
+              verifiedAt: new Date().toISOString(),
+            },
+          });
+        }, style: 'destructive' },
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Aprovar',
+          onPress: async () => {
+            verifyIdentity(notif.id, userEmail, true);
+            console.log('[Admin] Identity verification approved for:', userEmail);
+            updateNotification({
+              ...notif,
+              sent: true,
+              metadata: {
+                ...metadata,
+                verificationStatus: 'verified',
+                identityVerified: true,
+                verifiedAt: new Date().toISOString(),
+              },
+            });
+            Alert.alert('Sucesso', 'Identidade verificada e usuario liberado para saques.');
+          },
+        },
+      ],
+    );
+  }, [verifyIdentity, updateNotification]);
+
+  const handleConfirmLotteryClaim = useCallback((notif: AdminNotification) => {
+    const metadata = notif.metadata;
+    const amount = metadata?.amount ?? 0;
+    const targetEmail = metadata?.userEmail ?? '';
+    const lotteryCode = metadata?.lotteryCode ?? '';
+    const ticketId = metadata?.ticketId ?? '';
+
+    if (!targetEmail || !ticketId || amount <= 0) {
+      Alert.alert('Dados incompletos', 'Esta solicitacao nao possui os dados necessarios para credito.');
+      return;
+    }
+
+    Alert.alert(
+      'Confirmar premio',
+      `Creditar R$ ${amount.toFixed(2)} para ${targetEmail}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            const credited = await creditUserBalance(
+              targetEmail,
+              amount,
+              `Premio Loteria Federal - Bilhete ${lotteryCode || ticketId}`,
+            );
+
+            if (!credited) {
+              Alert.alert('Erro', 'Nao foi possivel creditar o premio para este usuario.');
+              return;
+            }
+
+            updateNotification({
+              ...notif,
+              sent: true,
+              metadata: {
+                ...metadata,
+                status: 'confirmed',
+                confirmedAt: new Date().toISOString(),
+              },
+            });
+
+            Alert.alert('Sucesso', 'Premio conferido e saldo atualizado com sucesso.');
+          },
+        },
+      ],
+    );
+  }, [creditUserBalance, updateNotification]);
 
   if (!isAdmin) {
     return (
@@ -1541,7 +1973,8 @@ export default function AdminPanel() {
                 onPress: async () => {
                   try {
                     const result = await seedDatabase();
-                    const allOk = result.sponsors.count > 0 && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
+                    const sponsorsOk = !result.sponsors.error;
+                    const allOk = sponsorsOk && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
                     const anyTableMissing = hasTableMissingError(result.sponsors.error) || hasTableMissingError(result.winners.error) || hasTableMissingError(result.leaderboard.error) || hasTableMissingError(result.grandPrize.error);
                     const anyConfigError = hasConfigError(result.sponsors.error) || hasConfigError(result.winners.error);
 
@@ -1552,7 +1985,7 @@ export default function AdminPanel() {
                     } else {
                       Alert.alert(
                         allOk ? 'Sucesso' : 'Sincronizacao com Erros',
-                        `Patrocinadores: ${result.sponsors.count > 0 ? result.sponsors.count + ' OK' : (result.sponsors.error ?? 'Falhou')}\nGanhadores: ${result.winners.ok ? 'OK' : (result.winners.error ?? 'Erro')}\nLeaderboard: ${result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Erro')}\nPremio: ${result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Erro')}`,
+                        `Patrocinadores: ${result.sponsors.error ? result.sponsors.error : `${result.sponsors.count} OK`}\nGanhadores: ${result.winners.ok ? 'OK' : (result.winners.error ?? 'Erro')}\nLeaderboard: ${result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Erro')}\nPremio: ${result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Erro')}`,
                       );
                     }
                   } catch (err) {
@@ -1609,11 +2042,12 @@ export default function AdminPanel() {
                         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                         Alert.alert('Tabelas nao encontradas!', 'As tabelas do banco de dados nao existem.');
                       } else {
-                        const sponsorStatus = result.sponsors.count > 0 ? `${result.sponsors.count} OK` : (result.sponsors.error ?? 'Falhou');
+                        const sponsorsOk = !result.sponsors.error;
+                        const sponsorStatus = result.sponsors.error ? result.sponsors.error : `${result.sponsors.count} OK`;
                         const winnersStatus = result.winners.ok ? 'OK' : (result.winners.error ?? 'Falhou');
                         const leaderboardStatus = result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Falhou');
                         const prizeStatus = result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Falhou');
-                        const allOk = result.sponsors.count > 0 && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
+                        const allOk = sponsorsOk && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
 
                         if (Platform.OS !== 'web') {
                           Haptics.notificationAsync(allOk ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
@@ -1765,6 +2199,17 @@ export default function AdminPanel() {
         <>
           <View style={a.section}>
             <View style={a.secHdr}>
+              <Plus size={18} color={Colors.dark.neonGreen} />
+              <Text style={a.secTtl}>Cadastro de Cidades</Text>
+            </View>
+            <TouchableOpacity style={a.addBtn} activeOpacity={0.8} onPress={() => setShowAddCityModal(true)}>
+              <Plus size={16} color={Colors.dark.neonGreen} />
+              <Text style={a.addBtnTxt}>Adicionar Cidade</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={a.section}>
+            <View style={a.secHdr}>
               <Building2 size={18} color={Colors.dark.orange} />
               <Text style={a.secTtl}>Cidades ({cities.length})</Text>
             </View>
@@ -1784,7 +2229,13 @@ export default function AdminPanel() {
                     activeOpacity={0.7}
                   >
                     <View style={a.cityRowIcon}>
-                      <MapPin size={16} color={Colors.dark.orange} />
+                      {getCityImageUri(ct.city) ? (
+                        <Image source={{ uri: getCityImageUri(ct.city)! }} style={a.cityThumbImage} contentFit="cover" />
+                      ) : (
+                        <View style={a.cityThumbPlaceholder}>
+                          <MapPin size={14} color={Colors.dark.orange} />
+                        </View>
+                      )}
                     </View>
                     <View style={a.cityRowInfo}>
                       <Text style={a.cityRowName}>{ct.city}</Text>
@@ -1815,32 +2266,34 @@ export default function AdminPanel() {
           <Text style={a.backBtnTxt}>Todas as Cidades</Text>
         </TouchableOpacity>
 
+        {(() => {
+          const headerImageUri = getCityImageUri(selectedCity);
+          const showHeaderImage = Boolean(headerImageUri) && !cityHeaderImageError;
+          return (
         <View style={a.cityHeaderCard}>
-          {cityImages[selectedCity ?? ''] ? (
-            <View style={a.cityHeaderImgWrap}>
-              <Image source={{ uri: cityImages[selectedCity ?? ''] }} style={a.cityHeaderBgImg} contentFit="cover" />
-              <View style={a.cityHeaderImgOverlay}>
-                <MapPin size={28} color="#fff" />
-                <Text style={a.cityHeaderName}>{selectedCity}</Text>
-                <Text style={a.cityHeaderSub}>{citySponsors.length} patrocinadores • {cities.find((c) => c.city === selectedCity)?.state ?? ''}</Text>
-                <TouchableOpacity style={a.cityPhotoBtn} onPress={() => handlePickCityPhoto(selectedCity!)} activeOpacity={0.7}>
-                  <ImageIcon size={14} color="#fff" />
-                  <Text style={a.cityPhotoBtnTxt}>Trocar Foto</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <LinearGradient colors={[Colors.dark.orange, Colors.dark.orangeDim]} style={a.cityHeaderGrad}>
+          <View style={a.cityHeaderImgWrap}>
+            <LinearGradient colors={[Colors.dark.orange, Colors.dark.orangeDim]} style={StyleSheet.absoluteFillObject} />
+            {showHeaderImage ? (
+              <Image
+                source={{ uri: headerImageUri! }}
+                style={a.cityHeaderBgImg}
+                contentFit="cover"
+                onError={() => setCityHeaderImageError(true)}
+              />
+            ) : null}
+            <View style={[a.cityHeaderImgOverlay, !showHeaderImage && a.cityHeaderNoImageOverlay]}>
               <MapPin size={28} color="#fff" />
               <Text style={a.cityHeaderName}>{selectedCity}</Text>
               <Text style={a.cityHeaderSub}>{citySponsors.length} patrocinadores • {cities.find((c) => c.city === selectedCity)?.state ?? ''}</Text>
               <TouchableOpacity style={a.cityPhotoBtn} onPress={() => handlePickCityPhoto(selectedCity!)} activeOpacity={0.7}>
                 <ImageIcon size={14} color="#fff" />
-                <Text style={a.cityPhotoBtnTxt}>Adicionar Foto da Cidade</Text>
+                <Text style={a.cityPhotoBtnTxt}>{showHeaderImage ? 'Trocar Foto' : 'Adicionar Foto da Cidade'}</Text>
               </TouchableOpacity>
-            </LinearGradient>
-          )}
+            </View>
+          </View>
         </View>
+          );
+        })()}
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={a.tabBar} contentContainerStyle={a.tabBarContent}>
           <TabButton label="Premio" active={citySubTab === 'prize'} onPress={() => setCitySubTab('prize')} icon={Trophy} />
@@ -1934,7 +2387,7 @@ export default function AdminPanel() {
       )}
       <TouchableOpacity style={a.addBtn} activeOpacity={0.8} onPress={handleOpenAdd} testID="add-sponsor-btn">
         <Plus size={16} color={Colors.dark.neonGreen} />
-        <Text style={a.addBtnTxt}>Adicionar Patrocinador em {selectedCity}</Text>
+        <Text style={a.addBtnTxt}>Novo Patrocinador (Perfil + Promocoes)</Text>
       </TouchableOpacity>
     </View>
   );
@@ -2051,7 +2504,7 @@ export default function AdminPanel() {
     );
   };
 
-  const handleOpenPromoForm = useCallback((promo?: PromotionalQR) => {
+  const handleOpenPromoForm = (promo?: PromotionalQR) => {
     if (promo) {
       setEditingPromo(promo);
       setPromoForm({
@@ -2067,9 +2520,9 @@ export default function AdminPanel() {
       setPromoForm({ sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100' });
     }
     setShowPromoForm(true);
-  }, []);
+  };
 
-  const handleSavePromo = useCallback(() => {
+  const handleSavePromo = () => {
     if (!promoForm.sponsorName.trim()) {
       Alert.alert('Erro', 'Nome da empresa e obrigatorio');
       return;
@@ -2104,9 +2557,9 @@ export default function AdminPanel() {
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowPromoForm(false);
     setEditingPromo(null);
-  }, [promoForm, selectedCity, editingPromo, cities, addPromoQR, updatePromoQR]);
+  };
 
-  const handleCopyPromoQR = useCallback(async (promo: PromotionalQR) => {
+  const handleCopyPromoQR = async (promo: PromotionalQR) => {
     const payload = JSON.stringify({
       type: 'cashbox_promo',
       promoId: promo.id,
@@ -2126,9 +2579,9 @@ export default function AdminPanel() {
     } catch {
       Alert.alert('Erro', 'Nao foi possivel copiar');
     }
-  }, []);
+  };
 
-  const handlePrintPromoQR = useCallback(async (promo: PromotionalQR) => {
+  const handlePrintPromoQR = async (promo: PromotionalQR) => {
     try {
       if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       const qrData = encodeURIComponent(JSON.stringify({
@@ -2206,7 +2659,7 @@ export default function AdminPanel() {
       console.log('[Admin] Print promo QR error:', err);
       Alert.alert('Erro', 'Nao foi possivel imprimir');
     }
-  }, []);
+  };
 
   const renderCityPromoQR = () => {
     const cityPromos = selectedCity ? getPromoQRsByCity(selectedCity) : [];
@@ -2239,6 +2692,12 @@ export default function AdminPanel() {
                 <View style={pq.rowActions}>
                   <TouchableOpacity style={pq.actBtn} onPress={() => handleCopyPromoQR(promo)}>
                     <Copy size={14} color={Colors.dark.neonGreen} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={pq.actBtn} onPress={() => {
+                    setPreviewPromoQR(promo);
+                    setShowPromoQRPreview(true);
+                  }}>
+                    <Eye size={14} color={Colors.dark.neonGreen} />
                   </TouchableOpacity>
                   <TouchableOpacity style={pq.actBtn} onPress={() => handlePrintPromoQR(promo)}>
                     <Printer size={14} color={Colors.dark.neonGreen} />
@@ -2387,6 +2846,16 @@ export default function AdminPanel() {
                   <Send size={14} color={Colors.dark.warning} />
                 </TouchableOpacity>
               )}
+              {isLotteryClaimNotification(notif) && (
+                <TouchableOpacity style={a.notifActBtn} onPress={() => handleConfirmLotteryClaim(notif)}>
+                  <DollarSign size={14} color={Colors.dark.success} />
+                </TouchableOpacity>
+              )}
+              {isIdentityVerificationNotification(notif) && (
+                <TouchableOpacity style={a.notifActBtn} onPress={() => handleVerifyIdentity(notif)}>
+                  <BadgeCheck size={14} color={Colors.dark.neonGreen} />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={[a.notifActBtn, { backgroundColor: 'rgba(239,68,68,0.1)' }]} onPress={() => {
                 Alert.alert('Excluir', 'Excluir esta notificacao?', [
                   { text: 'Cancelar', style: 'cancel' },
@@ -2442,6 +2911,10 @@ export default function AdminPanel() {
         visible={showBatchModal}
         onClose={() => setShowBatchModal(false)}
         sponsors={selectedCity ? citySponsors : sponsors}
+        onRequestPreview={(batch) => {
+          setPreviewBatch(batch);
+          setShowCouponPreview(true);
+        }}
         onGenerate={(batch) => {
           addCouponBatch(batch);
           console.log('[Admin] Generating individual coupons from batch:', batch.id, batch.codes.length, 'codes');
@@ -2463,6 +2936,47 @@ export default function AdminPanel() {
         }}
       />
 
+      <CouponPreviewModal
+        visible={showCouponPreview}
+        batch={previewBatch}
+        onClose={() => setShowCouponPreview(false)}
+        onPrint={(batch) => {
+          // Encontra a função printBatchCoupons no contexto
+          const html = generateThermalPrintHTML(batch);
+          console.log('[Admin] Printing batch from preview:', batch.id, 'codes:', batch.codes.length);
+          if (Platform.OS === 'web') {
+            const printWindow = window.open('', '_blank', 'width=800,height=600');
+            if (printWindow) {
+              printWindow.document.write(html);
+              printWindow.document.close();
+              printWindow.onload = () => {
+                setTimeout(() => {
+                  printWindow.print();
+                }, 500);
+              };
+            } else {
+              Print.printAsync({ html }).catch((err) => {
+                console.log('[Admin] Print error:', err);
+                Alert.alert('Erro', 'Não foi possível imprimir. Verifique se a impressora está conectada via Bluetooth ou WiFi.');
+              });
+            }
+          } else {
+            Print.printAsync({ html }).catch((err) => {
+              console.log('[Admin] Print error:', err);
+              Alert.alert('Erro', 'Não foi possível imprimir. Verifique se a impressora está conectada via Bluetooth ou WiFi.');
+            });
+          }
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }}
+      />
+
+      <PromoQRPreviewModal
+        visible={showPromoQRPreview}
+        promo={previewPromoQR}
+        onClose={() => setShowPromoQRPreview(false)}
+        onPrint={(promo) => handlePrintPromoQR(promo)}
+      />
+
       <NotificationModal
         visible={showNotifModal}
         onClose={() => { setShowNotifModal(false); setEditingNotif(null); }}
@@ -2475,6 +2989,133 @@ export default function AdminPanel() {
         }}
         initialData={editingNotif}
       />
+
+      <Modal visible={showAddCityModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAddCityModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={fm.container}>
+          <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+            <TouchableOpacity onPress={() => setShowAddCityModal(false)} style={fm.closeBtn}>
+              <X size={22} color={Colors.dark.text} />
+            </TouchableOpacity>
+            <Text style={fm.headerTitle}>Adicionar Cidade</Text>
+            <TouchableOpacity onPress={handleSaveManagedCity} style={fm.saveHeaderBtn}>
+              <Text style={fm.saveHeaderTxt}>Salvar</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={fm.scroll} keyboardShouldPersistTaps="handled">
+            <View style={fm.section}>
+              <Text style={fm.sectionTitle}>Dados da Cidade</Text>
+              <View style={fm.field}>
+                <Text style={fm.label}>UF *</Text>
+                <TouchableOpacity
+                  style={[fm.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                  onPress={() => setShowStatePicker((v) => !v)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ color: Colors.dark.text, fontSize: 14 }}>{newCityState}</Text>
+                  <ChevronDown size={16} color={Colors.dark.textMuted} />
+                </TouchableOpacity>
+                {showStatePicker ? (
+                  <View style={bm.pickerList}>
+                    <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+                      {STATES.map((uf) => (
+                        <TouchableOpacity
+                          key={uf}
+                          style={[bm.pickerItem, newCityState === uf && bm.pickerItemActive]}
+                          onPress={() => {
+                            setNewCityState(uf);
+                            setNewCityName('');
+                            setShowStatePicker(false);
+                            setShowCityPicker(true);
+                          }}
+                        >
+                          <Text style={[bm.pickerItemTxt, newCityState === uf && bm.pickerItemTxtActive]}>{uf}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
+              </View>
+              <View style={fm.field}>
+                <Text style={fm.label}>Cidade do Estado *</Text>
+                <TouchableOpacity
+                  style={[fm.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                  onPress={() => setShowCityPicker((v) => !v)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ color: newCityName ? Colors.dark.text : Colors.dark.textMuted, fontSize: 14 }}>
+                    {newCityName || 'Escolha uma cidade do estado'}
+                  </Text>
+                  <ChevronDown size={16} color={Colors.dark.textMuted} />
+                </TouchableOpacity>
+                {showCityPicker ? (
+                  <View style={bm.pickerList}>
+                    <ScrollView style={{ maxHeight: 260 }} nestedScrollEnabled>
+                      {suggestedCities.map((cityName) => (
+                        <TouchableOpacity
+                          key={cityName}
+                          style={[bm.pickerItem, newCityName === cityName && bm.pickerItemActive]}
+                          onPress={() => {
+                            setNewCityName(cityName);
+                            setShowCityPicker(false);
+                          }}
+                        >
+                          <Text style={[bm.pickerItemTxt, newCityName === cityName && bm.pickerItemTxtActive]}>{cityName}</Text>
+                          <Text style={bm.pickerItemSub}>{newCityState}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={fm.sectionSub}>A cidade sera criada com todas as abas prontas para editar: premio, lojas, cupons e QR promocional.</Text>
+            </View>
+
+            <View style={fm.section}>
+              <Text style={fm.sectionTitle}>Foto da Cidade</Text>
+              {newCityPhotoUri ? (
+                <>
+                  <View style={fm.photoPreviewContainer}>
+                    <Image source={{ uri: newCityPhotoUri }} style={fm.photoPreview} contentFit="cover" />
+                  </View>
+                  <TouchableOpacity style={fm.changePhotoBtn} onPress={handlePickNewCityPhoto} activeOpacity={0.8}>
+                    <Edit3 size={16} color={Colors.dark.text} />
+                    <Text style={fm.changePhotoBtnTxt}>Trocar Foto</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[fm.changePhotoBtn, { backgroundColor: Colors.dark.cardBorder }]}
+                    onPress={() => setNewCityPhotoUri(null)}
+                    activeOpacity={0.8}
+                  >
+                    <X size={16} color={Colors.dark.text} />
+                    <Text style={fm.changePhotoBtnTxt}>Remover Foto</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <View style={fm.photoPlaceholder}>
+                    <ImageIcon size={32} color={Colors.dark.textMuted} />
+                    <Text style={fm.photoPlaceholderTxt}>Nenhuma foto selecionada</Text>
+                  </View>
+                  <TouchableOpacity style={fm.addPhotoBtn} onPress={handlePickNewCityPhoto} activeOpacity={0.8}>
+                    <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={fm.addPhotoBtnGrad}>
+                      <ImageIcon size={16} color="#000" />
+                      <Text style={fm.addPhotoBtnTxt}>Adicionar Foto</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </>
+              )}
+              <Text style={fm.sectionSub}>A foto sera exibida nos cards da cidade e no cabeçalho.</Text>
+            </View>
+
+            <TouchableOpacity style={fm.saveFullBtn} onPress={handleSaveManagedCity} activeOpacity={0.8}>
+              <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={fm.saveFullGrad}>
+                <Save size={18} color="#000" />
+                <Text style={fm.saveFullTxt}>CRIAR CIDADE</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -2551,6 +3192,7 @@ const a = StyleSheet.create({
   cityHeaderImgWrap: { width: '100%', height: 180 },
   cityHeaderBgImg: { width: '100%', height: '100%' },
   cityHeaderImgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, padding: 24 },
+  cityHeaderNoImageOverlay: { backgroundColor: 'rgba(0,0,0,0.18)' },
   cityPhotoBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, marginTop: 6 },
   cityPhotoBtnTxt: { color: '#fff', fontSize: 12, fontWeight: '600' as const },
   stateRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 12 },
@@ -2561,7 +3203,9 @@ const a = StyleSheet.create({
   stateCountBadge: { backgroundColor: Colors.dark.neonGreen, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   stateCountTxt: { color: '#000', fontSize: 13, fontWeight: '800' as const },
   cityRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder, gap: 10 },
-  cityRowIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,107,0,0.1)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  cityRowIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,107,0,0.08)', alignItems: 'center' as const, justifyContent: 'center' as const, overflow: 'hidden' as const },
+  cityThumbImage: { width: '100%', height: '100%' },
+  cityThumbPlaceholder: { width: '100%', height: '100%', alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: 'rgba(255,107,0,0.1)' },
   cityRowInfo: { flex: 1 },
   cityRowName: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
   cityRowMeta: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },

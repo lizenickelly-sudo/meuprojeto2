@@ -1,0 +1,33 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Expo: start web",
+			"type": "shell",
+			"command": "bun",
+			"args": [
+				"run",
+				"start-web"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/expo"
+			},
+			"isBackground": true,
+			"group": "build"
+		},
+		{
+			"label": "Expo: start native",
+			"type": "shell",
+			"command": "bun",
+			"args": [
+				"run",
+				"start"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/expo"
+			},
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}

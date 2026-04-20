@@ -5,7 +5,6 @@ import { Image } from 'expo-image';
 import { MapPin, Trophy, Clock, Gift } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { GrandPrize } from '@/types';
-import { mockGrandPrize } from '@/mocks/winners';
 
 const { width, height } = Dimensions.get('window');
 
@@ -180,14 +179,10 @@ export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, ci
 
         <Animated.View style={[styles.prizeBox, { opacity: msgOp, transform: [{ translateY: msgY }] }]}>
           {(() => {
-            const prize = grandPrizeConfig ?? mockGrandPrize;
-            const bgUrl = prize.backgroundImageUrl || prize.imageUrl || cityImage || null;
+            const prize = grandPrizeConfig ?? null;
+            const bgUrl = prize?.backgroundImageUrl || prize?.imageUrl || cityImage || null;
             const hasCityPhoto = !!bgUrl;
-            const prizeValue = prize.value ?? mockGrandPrize.value;
-            const lotteryRef = prize.lotteryReference ?? mockGrandPrize.lotteryReference;
-            const drawDate = prize.drawDate ?? mockGrandPrize.drawDate;
-            const prizeCity = prize.city || userCity || '';
-            const prizeState = prize.state || '';
+            const drawDate = prize?.drawDate ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
             if (!hasCityPhoto) {
               return (

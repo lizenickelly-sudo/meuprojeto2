@@ -17,11 +17,10 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import {
   ScanLine,
-  Trophy,
   ChevronRight,
-  Star,
-  Heart,
   DollarSign,
+  Heart,
+  Star,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
@@ -29,7 +28,6 @@ import { useUser } from '@/providers/UserProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useAdmin } from '@/providers/AdminProvider';
 import { useAuth } from '@/providers/AuthProvider';
-import { mockWinners } from '@/mocks/winners';
 import { fetchWinners } from '@/services/database';
 import SponsorStories from '@/components/SponsorStories';
 import PromotionalFeed from '@/components/PromotionalFeed';
@@ -92,15 +90,20 @@ const cd = StyleSheet.create({
 
 function WinnerTicker() {
   const scrollX = useRef(new Animated.Value(0)).current;
-  const [winners, setWinners] = useState([...mockWinners, ...mockWinners]);
+  const [winners, setWinners] = useState<Array<{ id: string; name: string; city: string; amount: number }>>([]);
 
   useEffect(() => {
     fetchWinners().then((data) => {
-      if (data.length > 0) setWinners([...data, ...data]);
+      if (data.length > 0) {
+        setWinners([...data, ...data]);
+        return;
+      }
+      setWinners([]);
     });
   }, []);
 
   useEffect(() => {
+    if (winners.length === 0) return;
     const totalWidth = winners.length * 220;
     const anim = Animated.loop(
       Animated.timing(scrollX, {
@@ -111,7 +114,17 @@ function WinnerTicker() {
     );
     anim.start();
     return () => anim.stop();
-  }, []);
+  }, [scrollX, winners.length]);
+
+  if (winners.length === 0) {
+    return (
+      <View style={wt.container}>
+        <View style={[wt.row, { justifyContent: 'center' }]}>
+          <Text style={wt.city}>Sem ganhadores confirmados no momento</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={wt.container}>
@@ -139,83 +152,93 @@ const wt = StyleSheet.create({
   amt: { color: Colors.dark.primary, fontSize: 12, fontWeight: '800' as const },
 });
 
-function SponsorListItem({ sponsor, onPress }: { sponsor: Sponsor; onPress: () => void }) {
-  const rating = (4.3 + (sponsor.id.charCodeAt(1) % 6) * 0.1).toFixed(1);
-  const reviewCount = 80 + sponsor.id.charCodeAt(1) * 47;
-  const deliveryTime = `${30 + (sponsor.id.charCodeAt(1) % 4) * 10}-${50 + (sponsor.id.charCodeAt(1) % 4) * 10} min`;
-  const isFavorited = sponsor.id === 's1' || sponsor.id === 's3';
-
-  const tags: { label: string; color: string; bgColor: string }[] = [];
-  if (sponsor.verified) {
-    tags.push({ label: 'Mais Pedido', color: Colors.dark.accent, bgColor: Colors.dark.accentFaint });
-  }
-  if (sponsor.couponValue && sponsor.couponValue >= 15) {
-    tags.push({ label: `R$ ${sponsor.couponValue} off`, color: Colors.dark.primary, bgColor: Colors.dark.primaryFaint });
-  }
-  if (sponsor.couponValue && sponsor.couponValue >= 10) {
-    tags.push({ label: `Até R$ ${sponsor.couponValue}`, color: Colors.dark.primary, bgColor: Colors.dark.primaryFaint });
-  }
+function SponsorListItem({
+  sponsor,
+  onPress,
+  liked,
+  starred,
+  stars,
+  rank,
+  onToggleLike,
+  onToggleStar,
+}: {
+  sponsor: Sponsor;
+  onPress: () => void;
+  liked: boolean;
+  starred: boolean;
+  stars: number;
+  rank: number;
+  onToggleLike: () => void;
+  onToggleStar: () => void;
+}) {
+  const hasCoupon = Boolean(sponsor.couponValue && sponsor.couponValue >= 5);
+  const starsLabel = `${stars} estrela${stars === 1 ? '' : 's'}`;
 
   return (
-    <TouchableOpacity
-      style={sl.card}
-      onPress={onPress}
-      activeOpacity={0.7}
-      testID={`sponsor-list-${sponsor.id}`}
-    >
-      <View style={sl.logoWrap}>
-        <Image source={{ uri: sponsor.logoUrl }} style={sl.logo} contentFit="cover" cachePolicy="memory-disk" />
-      </View>
-      <View style={sl.content}>
-        <View style={sl.topRow}>
-          <View style={sl.tagsRow}>
-            {tags.map((tag, i) => (
-              <View key={i} style={[sl.tag, { backgroundColor: tag.bgColor }]}>
-                <Text style={[sl.tagTxt, { color: tag.color }]}>{tag.label}</Text>
-              </View>
-            ))}
-          </View>
+    <View style={sl.card} testID={`sponsor-list-${sponsor.id}`}>
+      <TouchableOpacity style={sl.mainTap} onPress={onPress} activeOpacity={0.75}>
+        <View style={sl.logoWrap}>
+          <Image source={{ uri: sponsor.logoUrl }} style={sl.logo} contentFit="cover" cachePolicy="memory-disk" />
         </View>
-        <View style={sl.nameRow}>
+        <View style={sl.content}>
+          <View style={sl.topRow}>
+            <View style={sl.topBadgesRow}>
+              {rank === 1 && <Text style={sl.hotBadge}>Mais Pedida</Text>}
+              {sponsor.verified && <Text style={sl.verifiedBadge}>Verificada</Text>}
+            </View>
+          </View>
+
           <Text style={sl.name} numberOfLines={1}>{sponsor.name}</Text>
-        </View>
-        <View style={sl.metaRow}>
-          <Star size={12} color="#FFD700" fill="#FFD700" />
-          <Text style={sl.rating}>{rating}</Text>
-          <Text style={sl.reviewCount}>({reviewCount})</Text>
-          <Text style={sl.metaDot}>•</Text>
-          <Text style={sl.metaText}>{deliveryTime}</Text>
-          <Text style={sl.metaDot}>•</Text>
-          <Text style={sl.metaText}>R$ {sponsor.minPurchaseValue?.toFixed(2)}</Text>
-        </View>
-        {tags.length > 0 && (
-          <View style={sl.offersRow}>
-            {sponsor.couponValue && sponsor.couponValue >= 10 && (
-              <Text style={sl.offerGreen}>R$ {sponsor.couponValue} off</Text>
-            )}
+
+          <View style={sl.metaRow}>
+            <Star size={11} color="#F59E0B" fill="#F59E0B" />
+            <Text style={sl.metaStrong}>{stars > 0 ? stars.toFixed(1) : '4.5'}</Text>
+            <Text style={sl.metaText}>({Math.max(stars * 12, 12)})</Text>
+            <Text style={sl.metaDot}>•</Text>
+            <Text style={sl.metaText}>{sponsor.city}</Text>
+            <Text style={sl.metaDot}>•</Text>
+            <Text style={sl.metaText}>R$ {sponsor.minPurchaseValue?.toFixed(2)}</Text>
           </View>
-        )}
-      </View>
-      <TouchableOpacity style={sl.heartBtn} activeOpacity={0.6}>
-        <Heart size={20} color={isFavorited ? '#FF4757' : Colors.dark.textMuted} fill={isFavorited ? '#FF4757' : 'transparent'} />
+
+          <View style={sl.bottomRow}>
+            <Text style={sl.categoryText} numberOfLines={1}>{sponsor.category}</Text>
+            {hasCoupon && <Text style={sl.couponTag}>R$ {sponsor.couponValue?.toFixed(0)} off</Text>}
+            <Text style={sl.rankTag}>#{rank}</Text>
+          </View>
+        </View>
       </TouchableOpacity>
-    </TouchableOpacity>
+
+      <View style={sl.rightActions}>
+        <TouchableOpacity style={sl.iconBtn} onPress={onToggleLike} activeOpacity={0.8}>
+          <Heart size={16} color={liked ? '#EF4444' : '#9CA3AF'} fill={liked ? '#EF4444' : 'transparent'} />
+        </TouchableOpacity>
+        <TouchableOpacity style={sl.iconBtn} onPress={onToggleStar} activeOpacity={0.8}>
+          <Star size={16} color={starred ? '#F59E0B' : '#9CA3AF'} fill={starred ? '#F59E0B' : 'transparent'} />
+        </TouchableOpacity>
+        <Text style={sl.starsTiny}>{starsLabel}</Text>
+      </View>
+    </View>
   );
 }
 
 const sl = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.04)',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  mainTap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   logoWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 14,
+    width: 58,
+    height: 58,
+    borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: Colors.dark.surfaceLight,
     borderWidth: 1,
@@ -227,74 +250,96 @@ const sl = StyleSheet.create({
   },
   content: {
     flex: 1,
-    marginLeft: 12,
-    gap: 3,
+    marginLeft: 10,
+    gap: 2,
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 1,
+    justifyContent: 'flex-start',
+    marginBottom: 2,
   },
-  tagsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  tag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  tagTxt: {
-    fontSize: 10,
-    fontWeight: '700' as const,
-  },
-  nameRow: {
+  topBadgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  hotBadge: {
+    color: '#FB7185',
+    fontSize: 10,
+    fontWeight: '700' as const,
+  },
+  verifiedBadge: {
+    color: Colors.dark.textMuted,
+    fontSize: 10,
   },
   name: {
     color: Colors.dark.text,
     fontSize: 15,
     fontWeight: '700' as const,
     flexShrink: 1,
+    marginBottom: 1,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
-  rating: {
-    color: Colors.dark.text,
-    fontSize: 12,
-    fontWeight: '700' as const,
-  },
-  reviewCount: {
-    color: Colors.dark.textMuted,
+  metaStrong: {
+    color: '#F59E0B',
     fontSize: 11,
+    fontWeight: '700' as const,
   },
   metaDot: {
     color: Colors.dark.textMuted,
-    fontSize: 11,
+    fontSize: 10,
   },
   metaText: {
     color: Colors.dark.textMuted,
-    fontSize: 12,
+    fontSize: 11,
   },
-  offersRow: {
+  bottomRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    gap: 6,
     marginTop: 2,
   },
-  offerGreen: {
-    color: Colors.dark.primary,
+  categoryText: {
+    color: Colors.dark.textMuted,
+    fontSize: 11,
+    flex: 1,
+  },
+  couponTag: {
+    color: '#22C55E',
     fontSize: 11,
     fontWeight: '700' as const,
   },
-  heartBtn: {
-    padding: 8,
-    marginLeft: 4,
+  rankTag: {
+    color: '#A78BFA',
+    fontSize: 11,
+    fontWeight: '700' as const,
+  },
+  rightActions: {
+    marginLeft: 8,
+    alignItems: 'center',
+    gap: 5,
+    paddingTop: 2,
+  },
+  iconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.dark.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.dark.surface,
+  },
+  starsTiny: {
+    color: Colors.dark.textMuted,
+    fontSize: 9,
+    maxWidth: 44,
+    textAlign: 'center',
   },
 });
 
@@ -303,23 +348,48 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { profile, balance, isLoading: userLoading } = useUser();
-  const { sponsors, sponsorsByCity } = useSponsor();
+  const {
+    sponsors,
+    sponsorsByCity,
+    toggleLikeSponsor,
+    toggleSponsorStar,
+    isSponsorLiked,
+    isSponsorStarred,
+    getSponsorStars,
+  } = useSponsor();
   const { grandPrizeConfig, getCityPrize, getCityImage } = useAdmin();
   const { userEmail } = useAuth();
   const userCity = profile.city || '';
+  const normalizedUserCity = userCity.trim().toLowerCase();
   const cityPrize = getCityPrize(userCity);
   const cityImage = getCityImage(userCity);
 
   const citySponsors = useMemo(() => {
-    return sponsorsByCity[userCity] || [];
-  }, [sponsorsByCity, userCity]);
+    if (!normalizedUserCity) return sponsors;
+    const byMap = sponsorsByCity[userCity] || [];
+    if (byMap.length > 0) return byMap;
+    return sponsors.filter((sp) => sp.city.trim().toLowerCase() === normalizedUserCity);
+  }, [sponsorsByCity, userCity, normalizedUserCity, sponsors]);
+
+  const rankedCitySponsors = useMemo(() => {
+    return [...citySponsors].sort((a, b) => {
+      const starsDiff = getSponsorStars(b.id) - getSponsorStars(a.id);
+      if (starsDiff !== 0) return starsDiff;
+      return a.name.localeCompare(b.name);
+    });
+  }, [citySponsors, getSponsorStars]);
 
   const cityOffers = useMemo(() => {
     return citySponsors.flatMap((sp) => sp.offers);
   }, [citySponsors]);
 
+  const allOffers = useMemo(() => {
+    return sponsors.flatMap((sp) => sp.offers);
+  }, [sponsors]);
+
   const hasCityStores = citySponsors.length > 0;
   const hasCityOffers = cityOffers.length > 0;
+  const hasAnyOffers = allOffers.length > 0;
   const [showSplash, setShowSplash] = useState<boolean>(true);
   const [splashEmail, setSplashEmail] = useState<string>('');
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -399,8 +469,11 @@ export default function HomeScreen() {
 
         <WinnerTicker />
 
-        {hasCityOffers && (
-          <PromotionalFeed onGoToStore={handleSponsorPress} userCity={userCity || undefined} />
+        {hasAnyOffers && (
+          <PromotionalFeed
+            onGoToStore={handleSponsorPress}
+            userCity={hasCityOffers ? (userCity || undefined) : undefined}
+          />
         )}
 
         <View style={s.quickRow}>
@@ -415,18 +488,27 @@ export default function HomeScreen() {
         {hasCityStores && (
           <>
             <View style={s.sponsorsHeader}>
-              <Text style={s.sponsorsTitle}>Lojas{userCity ? ` em ${userCity}` : ''}</Text>
+              <View>
+                <Text style={s.sponsorsTitle}>Lojas{userCity ? ` em ${userCity}` : ''}</Text>
+                <Text style={s.sponsorsSubTitle}>Ranking por estrelas</Text>
+              </View>
               <TouchableOpacity style={s.seeAllBtn} onPress={() => handleSponsorPress(citySponsors[0]?.id || '')}>
                 <Text style={s.seeAll}>Ver todas</Text>
                 <ChevronRight size={12} color={Colors.dark.primary} />
               </TouchableOpacity>
             </View>
             <View style={s.sponsorsList}>
-              {citySponsors.map((sp) => (
+              {rankedCitySponsors.map((sp, index) => (
                 <SponsorListItem
                   key={sp.id}
                   sponsor={sp}
                   onPress={() => handleSponsorPress(sp.id)}
+                  liked={isSponsorLiked(sp.id)}
+                  starred={isSponsorStarred(sp.id)}
+                  stars={getSponsorStars(sp.id)}
+                  rank={index + 1}
+                  onToggleLike={() => toggleLikeSponsor(sp.id)}
+                  onToggleStar={() => toggleSponsorStar(sp.id)}
                 />
               ))}
             </View>
@@ -454,6 +536,7 @@ const s = StyleSheet.create({
   quickTxt: { color: '#FFF', fontSize: 14, fontWeight: '900' as const, letterSpacing: 0.5 },
   sponsorsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginTop: 4, marginBottom: 4 },
   sponsorsTitle: { color: Colors.dark.text, fontSize: 20, fontWeight: '800' as const },
+  sponsorsSubTitle: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 1 },
   seeAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   seeAll: { color: Colors.dark.primary, fontSize: 13, fontWeight: '600' as const },
   sponsorsList: { marginBottom: 8 },

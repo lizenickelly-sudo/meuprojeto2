@@ -5,7 +5,7 @@ import React, { useEffect, useCallback } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
 import { AppProvider } from "@/providers/AppProvider";
-import { AuthProvider } from "@/providers/AuthProvider";
+import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import Colors from "@/constants/colors";
 
@@ -62,6 +62,16 @@ function RootLayoutNav() {
   );
 }
 
+function AppShell() {
+  const { resetEpoch, isLoggedIn, userEmail } = useAuth();
+  return (
+    <AppProvider key={`app_${resetEpoch}_${isLoggedIn ? userEmail : 'guest'}`}>
+      <StatusBar style="dark" />
+      <RootLayoutNav />
+    </AppProvider>
+  );
+}
+
 export default function RootLayout() {
   const onLayoutReady = useCallback(async () => {
     console.log("[RootLayout] Layout ready, hiding splash");
@@ -79,10 +89,7 @@ export default function RootLayout() {
       >
         <ErrorBoundary>
           <AuthProvider>
-            <AppProvider>
-              <StatusBar style="dark" />
-              <RootLayoutNav />
-            </AppProvider>
+            <AppShell />
           </AuthProvider>
         </ErrorBoundary>
       </GestureHandlerRootView>

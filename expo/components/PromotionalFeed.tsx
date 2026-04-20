@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useUser } from '@/providers/UserProvider';
+import OfferDetailModal from '@/components/OfferDetailModal';
 import type { Offer, Sponsor } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -46,18 +47,22 @@ function openExternalMap(lat: number, lon: number, label: string) {
 
 function PromotionalCard({
   item,
+  onOpenOffer,
   onGoToStore,
   onGoToLocation,
   onLike,
   onShare,
+  onComment,
   isLiked,
   isShared,
 }: {
   item: PromotionalItem;
+  onOpenOffer: () => void;
   onGoToStore: () => void;
   onGoToLocation: () => void;
   onLike: () => void;
   onShare: () => void;
+  onComment: () => void;
   isLiked: boolean;
   isShared: boolean;
 }) {
@@ -118,7 +123,7 @@ function PromotionalCard({
           activeOpacity={0.95}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
-          onPress={onGoToStore}
+          onPress={onOpenOffer}
         >
           <View style={pc.imageWrap}>
             <Image
@@ -146,18 +151,18 @@ function PromotionalCard({
                   fill={isLiked ? '#EF4444' : 'transparent'}
                 />
               </Animated.View>
-              <Text style={pc.socialCount}>{item.offer.likes + (isLiked ? 1 : 0)}</Text>
+              <Text style={pc.socialCount}>{item.offer.likes || 0}</Text>
               {isLiked && <Check size={10} color={Colors.dark.success} />}
             </TouchableOpacity>
-            <TouchableOpacity style={pc.socialBtn} activeOpacity={0.7}>
+            <TouchableOpacity style={pc.socialBtn} onPress={onComment} activeOpacity={0.7}>
               <MessageCircle size={20} color={Colors.dark.textMuted} />
-              <Text style={pc.socialCount}>{item.offer.comments}</Text>
+              <Text style={pc.socialCount}>{item.offer.comments || 0}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={pc.socialBtn} onPress={handleShare} activeOpacity={0.7}>
               <Animated.View style={{ transform: [{ scale: shareScale }] }}>
                 <Share2 size={20} color={isShared ? Colors.dark.neonGreen : Colors.dark.textMuted} />
               </Animated.View>
-              <Text style={pc.socialCount}>{item.offer.shares + (isShared ? 1 : 0)}</Text>
+              <Text style={pc.socialCount}>{item.offer.shares || 0}</Text>
               {isShared && <Check size={10} color={Colors.dark.success} />}
             </TouchableOpacity>
           </View>
@@ -339,17 +344,34 @@ export default function PromotionalFeed({
   onGoToStore: (sponsorId: string) => void;
   userCity?: string;
 }) {
-  const { sponsors, toggleLikeOffer: rawToggleLike, shareOffer: rawShare, isOfferLiked, isOfferShared } = useSponsor();
+  const {
+    sponsors,
+    toggleLikeOffer: rawToggleLike,
+    shareOffer: rawShare,
+    addOfferComment,
+    isOfferLiked,
+    isOfferShared,
+  } = useSponsor();
   const { addPoints } = useUser();
   const toggleLikeOffer = useCallback((offerId: string) => rawToggleLike(offerId, (pts) => addPoints(pts)), [rawToggleLike, addPoints]);
   const shareOffer = useCallback((offerId: string) => rawShare(offerId, (pts) => addPoints(pts)), [rawShare, addPoints]);
+  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
+  const [selectedOfferList, setSelectedOfferList] = useState<Offer[]>([]);
+  const [selectedOfferIndex, setSelectedOfferIndex] = useState<number>(0);
+  const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
+  const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [openCommentsFirst, setOpenCommentsFirst] = useState<boolean>(false);
   const flatListRef = useRef<FlatList>(null);
   const currentIndex = useRef<number>(0);
   const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const allItems: PromotionalItem[] = useMemo(() => {
     const items: PromotionalItem[] = [];
-    const filtered = userCity ? sponsors.filter((sp) => sp.city === userCity) : sponsors;
+    const normalizedUserCity = (userCity || '').trim().toLowerCase();
+    const filteredByCity = normalizedUserCity
+      ? sponsors.filter((sp) => sp.city.trim().toLowerCase() === normalizedUserCity)
+      : sponsors;
+    const filtered = filteredByCity.length > 0 ? filteredByCity : sponsors;
     filtered.forEach((sp) => {
       sp.offers.forEach((offer) => {
         items.push({ offer, sponsor: sp });
@@ -439,9 +461,41 @@ export default function PromotionalFeed({
     openExternalMap(sponsor.latitude, sponsor.longitude, sponsor.name);
   }, []);
 
+  const handleComment = useCallback((item: PromotionalItem) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const idx = allItems.findIndex((it) => it.offer.id === item.offer.id && it.sponsor.id === item.sponsor.id);
+    setSelectedOfferList(allItems.map((it) => it.offer));
+    setSelectedOfferIndex(idx >= 0 ? idx : 0);
+    setSelectedOffer(item.offer);
+    setSelectedSponsor(item.sponsor);
+    setOpenCommentsFirst(true);
+    setModalVisible(true);
+  }, [allItems]);
+
+  const handleOpenOffer = useCallback((item: PromotionalItem) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const idx = allItems.findIndex((it) => it.offer.id === item.offer.id && it.sponsor.id === item.sponsor.id);
+    setSelectedOfferList(allItems.map((it) => it.offer));
+    setSelectedOfferIndex(idx >= 0 ? idx : 0);
+    setSelectedOffer(item.offer);
+    setSelectedSponsor(item.sponsor);
+    setOpenCommentsFirst(false);
+    setModalVisible(true);
+  }, [allItems]);
+
+  const handleCloseModal = useCallback(() => {
+    setModalVisible(false);
+    setSelectedOffer(null);
+    setSelectedOfferList([]);
+    setSelectedOfferIndex(0);
+    setSelectedSponsor(null);
+    setOpenCommentsFirst(false);
+  }, []);
+
   const renderItem = useCallback(({ item }: { item: PromotionalItem }) => (
     <PromotionalCard
       item={item}
+      onOpenOffer={() => handleOpenOffer(item)}
       onGoToStore={() => handleGoToStore(item.sponsor.id)}
       onGoToLocation={() => handleGoToLocation(item.sponsor)}
       onLike={() => {
@@ -456,10 +510,11 @@ export default function PromotionalFeed({
           console.log('[PromotionalFeed] Already shared offer:', item.offer.id);
         }
       }}
+      onComment={() => handleComment(item)}
       isLiked={isOfferLiked(item.offer.id)}
       isShared={isOfferShared(item.offer.id)}
     />
-  ), [handleGoToStore, handleGoToLocation, toggleLikeOffer, shareOffer, isOfferLiked, isOfferShared]);
+  ), [handleOpenOffer, handleGoToStore, handleGoToLocation, toggleLikeOffer, shareOffer, handleComment, isOfferLiked, isOfferShared]);
 
   const keyExtractor = useCallback((_: PromotionalItem, index: number) => `promo-${index}`, []);
 
@@ -505,6 +560,15 @@ export default function PromotionalFeed({
         initialNumToRender={3}
         maxToRenderPerBatch={5}
         windowSize={5}
+      />
+      <OfferDetailModal
+        visible={modalVisible}
+        offer={selectedOffer}
+        sponsor={selectedSponsor}
+        offerList={selectedOfferList}
+        initialIndex={selectedOfferIndex}
+        startWithComments={openCommentsFirst}
+        onClose={handleCloseModal}
       />
     </View>
   );

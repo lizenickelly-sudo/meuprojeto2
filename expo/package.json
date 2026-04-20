@@ -3,9 +3,11 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "bunx rork start -p itpmn8bnhs7ry665ktflm --tunnel",
-    "start-web": "bunx rork start -p itpmn8bnhs7ry665ktflm --web --tunnel",
-    "start-web-dev": "DEBUG=expo* bunx rork start -p itpmn8bnhs7ry665ktflm --web --tunnel",
+    "start": "bunx rork start -p itpmn8bnhs7ry665ktflm",
+    "start:tunnel": "bunx rork start -p itpmn8bnhs7ry665ktflm --tunnel",
+    "start-web": "bunx rork start -p itpmn8bnhs7ry665ktflm --web",
+    "start-web:tunnel": "bunx rork start -p itpmn8bnhs7ry665ktflm --web --tunnel",
+    "start-web-dev": "cross-env DEBUG=expo* bunx rork start -p itpmn8bnhs7ry665ktflm --web",
     "lint": "expo lint"
   },
   "dependencies": {
@@ -14,6 +16,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@rork-ai/toolkit-sdk": "^0.2.51",
     "@stardazed/streams-text-encoding": "^1.0.2",
+    "@supabase/supabase-js": "^2.103.0",
     "@tanstack/react-query": "^5.83.0",
     "@ungap/structured-clone": "^1.3.0",
     "expo": "~54.0.27",
@@ -25,6 +28,7 @@
     "expo-font": "~14.0.10",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
+    "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "~17.0.9",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.10",
@@ -51,6 +55,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "cross-env": "^7.0.3",
     "@expo/ngrok": "^4.1.0",
     "@types/react": "~19.1.10",
     "eslint": "^9.31.0",
