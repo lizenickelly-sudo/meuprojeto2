@@ -5,9 +5,9 @@
   "scripts": {
     "start": "bunx rork start -p itpmn8bnhs7ry665ktflm",
     "start:tunnel": "bunx rork start -p itpmn8bnhs7ry665ktflm --tunnel",
-    "start-web": "bunx rork start -p itpmn8bnhs7ry665ktflm --web",
-    "start-web:tunnel": "bunx rork start -p itpmn8bnhs7ry665ktflm --web --tunnel",
-    "start-web-dev": "cross-env DEBUG=expo* bunx rork start -p itpmn8bnhs7ry665ktflm --web",
+    "start-web": "bunx rork start -p itpmn8bnhs7ry665ktflm --web --port 19000",
+    "start-web:tunnel": "bunx rork start -p itpmn8bnhs7ry665ktflm --web --tunnel --port 19000",
+    "start-web-dev": "cross-env DEBUG=expo* bunx rork start -p itpmn8bnhs7ry665ktflm --web --port 19000",
     "lint": "expo lint"
   },
   "dependencies": {

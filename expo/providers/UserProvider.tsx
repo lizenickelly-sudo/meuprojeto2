@@ -5,8 +5,6 @@ import createContextHook from '@nkzw/create-context-hook';
 import { UserProfile, Transaction } from '@/types';
 import { upsertUser as dbUpsertUser } from '@/services/database';
 import { useAuth } from '@/providers/AuthProvider';
-import { invalidateDomain, readDomainCache, writeDomainCache } from '@/lib/stateCache';
-import { flushSyncQueue, scheduleUserCriticalSync } from '@/lib/offlineSyncQueue';
 
 function normalizeTransaction(raw: unknown): Transaction | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -40,19 +38,6 @@ function getUserStorageKeys(email: string) {
   };
 }
 
-function getUserCacheKeys(email: string) {
-  const normalized = (email || 'guest').trim().toLowerCase();
-  return {
-    PROFILE: `${normalized}:profile`,
-    BALANCE: `${normalized}:balance`,
-    POINTS: `${normalized}:points`,
-    TRANSACTIONS: `${normalized}:transactions`,
-    REFERRAL_COUNT: `${normalized}:referral_count`,
-  };
-}
-
-const USER_CACHE_TTL_MS = 1000 * 60 * 30;
-
 const POINTS_TO_CURRENCY_RATE = 0.1;
 const MIN_REDEEM_VALUE = 5.0;
 
@@ -84,7 +69,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
   const [prevEmail, setPrevEmail] = useState<string>('');
 
   const storageKeys = useMemo(() => getUserStorageKeys(userEmail), [userEmail]);
-  const cacheKeys = useMemo(() => getUserCacheKeys(userEmail), [userEmail]);
 
   useEffect(() => {
     if (userEmail !== prevEmail) {
@@ -95,9 +79,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       setBalance(0);
       setPoints(0);
       setReferralCount(0);
-      invalidateDomain('user').catch((error) => {
-        console.log('[UserProvider] Failed invalidating user domain cache on user switch:', error);
-      });
       queryClient.invalidateQueries({ queryKey: ['user_profile'] });
       queryClient.invalidateQueries({ queryKey: ['user_balance'] });
       queryClient.invalidateQueries({ queryKey: ['user_points'] });
@@ -114,59 +95,22 @@ export const [UserProvider, useUser] = createContextHook(() => {
       setBalance(0);
       setPoints(0);
       setReferralCount(0);
-      invalidateDomain('user').catch((error) => {
-        console.log('[UserProvider] Failed invalidating user domain cache on logout:', error);
-      });
     }
   }, [isLoggedIn]);
-
-  const enqueueCriticalSync = useCallback(async (
-    nextProfile: UserProfile,
-    nextBalance: number,
-    nextPoints: number,
-  ) => {
-    const email = (nextProfile.email || userEmail || '').trim().toLowerCase();
-    if (!email) return;
-
-    await scheduleUserCriticalSync({
-      email,
-      profile: {
-        ...nextProfile,
-        email,
-      },
-      balance: Number.isFinite(nextBalance) ? nextBalance : 0,
-      points: Number.isFinite(nextPoints) ? nextPoints : 0,
-    });
-
-    await flushSyncQueue();
-  }, [userEmail]);
-
-  useEffect(() => {
-    if (!isLoggedIn || !userEmail) return;
-    flushSyncQueue().catch((error) => {
-      console.log('[UserProvider] Initial sync queue flush failed:', error);
-    });
-  }, [isLoggedIn, userEmail]);
 
   const profileQuery = useQuery({
     queryKey: ['user_profile', userEmail],
     queryFn: async () => {
-      const cached = await readDomainCache<UserProfile>('user', cacheKeys.PROFILE, USER_CACHE_TTL_MS);
-      if (cached) return cached;
-
       const keys = getUserStorageKeys(userEmail);
       console.log('[UserProvider] Loading profile for:', userEmail, 'key:', keys.USER_PROFILE);
       const stored = await AsyncStorage.getItem(keys.USER_PROFILE);
       if (stored) {
         const parsed = JSON.parse(stored) as UserProfile;
         console.log('[UserProvider] Found stored profile:', parsed.name);
-        await writeDomainCache('user', cacheKeys.PROFILE, parsed);
         return parsed;
       }
       console.log('[UserProvider] No profile found, returning default');
-      const fallback = { ...defaultProfile, email: userEmail };
-      await writeDomainCache('user', cacheKeys.PROFILE, fallback);
-      return fallback;
+      return { ...defaultProfile, email: userEmail };
     },
     enabled: !!userEmail && isLoggedIn,
   });
@@ -174,14 +118,9 @@ export const [UserProvider, useUser] = createContextHook(() => {
   const balanceQuery = useQuery({
     queryKey: ['user_balance', userEmail],
     queryFn: async () => {
-      const cached = await readDomainCache<number>('user', cacheKeys.BALANCE, USER_CACHE_TTL_MS);
-      if (cached !== null) return cached;
-
       const keys = getUserStorageKeys(userEmail);
       const stored = await AsyncStorage.getItem(keys.BALANCE);
-      const value = stored ? parseFloat(stored) : 0;
-      await writeDomainCache('user', cacheKeys.BALANCE, value);
-      return value;
+      return stored ? parseFloat(stored) : 0;
     },
     enabled: !!userEmail && isLoggedIn,
   });
@@ -189,14 +128,9 @@ export const [UserProvider, useUser] = createContextHook(() => {
   const pointsQuery = useQuery({
     queryKey: ['user_points', userEmail],
     queryFn: async () => {
-      const cached = await readDomainCache<number>('user', cacheKeys.POINTS, USER_CACHE_TTL_MS);
-      if (cached !== null) return cached;
-
       const keys = getUserStorageKeys(userEmail);
       const stored = await AsyncStorage.getItem(keys.POINTS);
-      const value = stored ? parseInt(stored, 10) : 0;
-      await writeDomainCache('user', cacheKeys.POINTS, value);
-      return value;
+      return stored ? parseInt(stored, 10) : 0;
     },
     enabled: !!userEmail && isLoggedIn,
   });
@@ -204,18 +138,13 @@ export const [UserProvider, useUser] = createContextHook(() => {
   const transactionsQuery = useQuery({
     queryKey: ['user_transactions', userEmail],
     queryFn: async () => {
-      const cached = await readDomainCache<Transaction[]>('user', cacheKeys.TRANSACTIONS, USER_CACHE_TTL_MS);
-      if (cached) return cached;
-
       const keys = getUserStorageKeys(userEmail);
       const stored = await AsyncStorage.getItem(keys.TRANSACTIONS);
       if (!stored) return [];
       try {
         const parsed = JSON.parse(stored) as unknown;
         if (!Array.isArray(parsed)) return [];
-        const normalized = parsed.map(normalizeTransaction).filter((item): item is Transaction => item !== null);
-        await writeDomainCache('user', cacheKeys.TRANSACTIONS, normalized);
-        return normalized;
+        return parsed.map(normalizeTransaction).filter((item): item is Transaction => item !== null);
       } catch (error) {
         console.log('[UserProvider] Failed to parse transactions:', error);
         return [];
@@ -227,14 +156,9 @@ export const [UserProvider, useUser] = createContextHook(() => {
   const referralQuery = useQuery({
     queryKey: ['referral_count', userEmail],
     queryFn: async () => {
-      const cached = await readDomainCache<number>('user', cacheKeys.REFERRAL_COUNT, USER_CACHE_TTL_MS);
-      if (cached !== null) return cached;
-
       const keys = getUserStorageKeys(userEmail);
       const stored = await AsyncStorage.getItem(keys.REFERRAL_COUNT);
-      const value = stored ? parseInt(stored, 10) : 0;
-      await writeDomainCache('user', cacheKeys.REFERRAL_COUNT, value);
-      return value;
+      return stored ? parseInt(stored, 10) : 0;
     },
     enabled: !!userEmail && isLoggedIn,
   });
@@ -281,7 +205,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
   const saveProfileMutation = useMutation({
     mutationFn: async (newProfile: UserProfile) => {
       await AsyncStorage.setItem(storageKeys.USER_PROFILE, JSON.stringify(newProfile));
-      await writeDomainCache('user', cacheKeys.PROFILE, newProfile);
       return newProfile;
     },
     onSuccess: (data) => {
@@ -290,9 +213,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       dbUpsertUser(data, balance, points).then((ok) => {
         if (ok) console.log('[UserProvider] User synced to Supabase:', data.name);
       });
-      enqueueCriticalSync(data, balance, points).catch((error) => {
-        console.log('[UserProvider] Failed enqueueing critical sync after profile save:', error);
-      });
     },
   });
 
@@ -300,15 +220,11 @@ export const [UserProvider, useUser] = createContextHook(() => {
     mutationFn: async (amount: number) => {
       const newBalance = balance + amount;
       await AsyncStorage.setItem(storageKeys.BALANCE, newBalance.toString());
-      await writeDomainCache('user', cacheKeys.BALANCE, newBalance);
       return newBalance;
     },
     onSuccess: (data) => {
       setBalance(data);
       queryClient.invalidateQueries({ queryKey: ['user_balance', userEmail] });
-      enqueueCriticalSync(profile, data, points).catch((error) => {
-        console.log('[UserProvider] Failed enqueueing critical sync after balance update:', error);
-      });
     },
   });
 
@@ -316,15 +232,11 @@ export const [UserProvider, useUser] = createContextHook(() => {
     mutationFn: async (pts: number) => {
       const newPoints = points + pts;
       await AsyncStorage.setItem(storageKeys.POINTS, newPoints.toString());
-      await writeDomainCache('user', cacheKeys.POINTS, newPoints);
       return newPoints;
     },
     onSuccess: (data) => {
       setPoints(data);
       queryClient.invalidateQueries({ queryKey: ['user_points', userEmail] });
-      enqueueCriticalSync(profile, balance, data).catch((error) => {
-        console.log('[UserProvider] Failed enqueueing critical sync after points update:', error);
-      });
     },
   });
 
@@ -332,7 +244,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
     mutationFn: async (tx: Transaction) => {
       const updated = [tx, ...transactions];
       await AsyncStorage.setItem(storageKeys.TRANSACTIONS, JSON.stringify(updated));
-      await writeDomainCache('user', cacheKeys.TRANSACTIONS, updated);
       return updated;
     },
     onSuccess: (data) => {
@@ -345,7 +256,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
     mutationFn: async () => {
       const newCount = referralCount + 1;
       await AsyncStorage.setItem(storageKeys.REFERRAL_COUNT, newCount.toString());
-      await writeDomainCache('user', cacheKeys.REFERRAL_COUNT, newCount);
       return newCount;
     },
     onSuccess: (data) => {
@@ -363,8 +273,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       const newBalance = balance + pointsValue;
       await AsyncStorage.setItem(storageKeys.BALANCE, newBalance.toString());
       await AsyncStorage.setItem(storageKeys.POINTS, '0');
-      await writeDomainCache('user', cacheKeys.BALANCE, newBalance);
-      await writeDomainCache('user', cacheKeys.POINTS, 0);
       const tx: Transaction = {
         id: `tx_pts_${Date.now()}`,
         type: 'credit',
@@ -375,7 +283,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       };
       const updatedTx = [tx, ...transactions];
       await AsyncStorage.setItem(storageKeys.TRANSACTIONS, JSON.stringify(updatedTx));
-      await writeDomainCache('user', cacheKeys.TRANSACTIONS, updatedTx);
       return { balance: newBalance, transactions: updatedTx };
     },
     onSuccess: (data) => {
@@ -386,9 +293,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       queryClient.invalidateQueries({ queryKey: ['user_points', userEmail] });
       queryClient.invalidateQueries({ queryKey: ['user_transactions', userEmail] });
       console.log('[UserProvider] Points redeemed successfully, balance:', data.balance);
-      enqueueCriticalSync(profile, data.balance, 0).catch((error) => {
-        console.log('[UserProvider] Failed enqueueing critical sync after points redemption:', error);
-      });
     },
   });
 
@@ -398,7 +302,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       if (!pixKey) throw new Error('Selecione uma chave PIX para sacar');
       const newBalance = balance - amount;
       await AsyncStorage.setItem(storageKeys.BALANCE, newBalance.toString());
-      await writeDomainCache('user', cacheKeys.BALANCE, newBalance);
       const tx: Transaction = {
         id: `tx_${Date.now()}`,
         type: 'debit',
@@ -409,7 +312,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       };
       const updatedTx = [tx, ...transactions];
       await AsyncStorage.setItem(storageKeys.TRANSACTIONS, JSON.stringify(updatedTx));
-      await writeDomainCache('user', cacheKeys.TRANSACTIONS, updatedTx);
       return { balance: newBalance, transactions: updatedTx };
     },
     onSuccess: (data) => {
@@ -417,9 +319,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
       setTransactions(data.transactions);
       queryClient.invalidateQueries({ queryKey: ['user_balance', userEmail] });
       queryClient.invalidateQueries({ queryKey: ['user_transactions', userEmail] });
-      enqueueCriticalSync(profile, data.balance, points).catch((error) => {
-        console.log('[UserProvider] Failed enqueueing critical sync after withdraw:', error);
-      });
     },
   });
 
@@ -446,13 +345,9 @@ export const [UserProvider, useUser] = createContextHook(() => {
       const newPoints = points - tx.amount;
       setPoints(newPoints);
       await AsyncStorage.setItem(storageKeys.POINTS, String(newPoints));
-      await writeDomainCache('user', cacheKeys.POINTS, newPoints);
-      enqueueCriticalSync(profile, balance, newPoints).catch((error) => {
-        console.log('[UserProvider] Failed enqueueing critical sync after raw transaction points debit:', error);
-      });
     }
     addTransactionMutation.mutate(tx);
-  }, [points, addTransactionMutation, storageKeys.POINTS, cacheKeys.POINTS, enqueueCriticalSync, profile, balance]);
+  }, [points, addTransactionMutation, storageKeys.POINTS]);
 
   const withdraw = useCallback((amount: number, pixKey: string) => {
     withdrawMutation.mutate({ amount, pixKey });
@@ -477,7 +372,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
     const safeCurrentBalance = Number.isFinite(currentBalance) ? currentBalance : 0;
     const newBalance = safeCurrentBalance + amount;
     await AsyncStorage.setItem(keys.BALANCE, newBalance.toString());
-    await writeDomainCache('user', `${normalizedEmail}:balance`, newBalance);
 
     const storedTx = await AsyncStorage.getItem(keys.TRANSACTIONS);
     let existingTransactions: Transaction[] = [];
@@ -504,7 +398,6 @@ export const [UserProvider, useUser] = createContextHook(() => {
 
     const updatedTransactions = [tx, ...existingTransactions];
     await AsyncStorage.setItem(keys.TRANSACTIONS, JSON.stringify(updatedTransactions));
-    await writeDomainCache('user', `${normalizedEmail}:transactions`, updatedTransactions);
 
     if (isLoggedIn && normalizedEmail === userEmail.toLowerCase()) {
       setBalance(newBalance);

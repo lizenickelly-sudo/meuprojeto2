@@ -390,17 +390,20 @@ export default function HomeScreen() {
   const hasCityStores = citySponsors.length > 0;
   const hasCityOffers = cityOffers.length > 0;
   const hasAnyOffers = allOffers.length > 0;
-  const [showSplash, setShowSplash] = useState<boolean>(true);
+  const shouldShowWelcomeSplash = Platform.OS !== 'web';
+  const [showSplash, setShowSplash] = useState<boolean>(shouldShowWelcomeSplash);
   const [splashEmail, setSplashEmail] = useState<string>('');
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   useEffect(() => {
+    if (!shouldShowWelcomeSplash) return;
+
     if (userEmail && userEmail !== splashEmail) {
       console.log('[HomeScreen] User changed, resetting splash. Old:', splashEmail, 'New:', userEmail);
       setSplashEmail(userEmail);
       setShowSplash(true);
     }
-  }, [userEmail, splashEmail]);
+  }, [userEmail, splashEmail, shouldShowWelcomeSplash]);
 
   const handleDismissSplash = useCallback(() => {
     setShowSplash(false);

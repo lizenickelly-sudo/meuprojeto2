@@ -34,6 +34,12 @@ type RemoteUserRow = {
   updated_at?: string | null;
 };
 
+type RemoteAppStateRow = {
+  key: string;
+  value?: unknown;
+  updated_at?: string | null;
+};
+
 const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').trim();
 const SUPABASE_ANON_KEY = (
   process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
@@ -81,6 +87,52 @@ async function supabaseRequest(path: string, init?: RequestInit): Promise<Respon
     ...(init?.headers || {}),
   };
   return fetch(url, { ...init, headers });
+}
+
+async function fetchRemoteAppState<T>(key: string): Promise<T | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const query = `/rest/v1/app_state?select=value&key=eq.${encodeURIComponent(key)}&limit=1`;
+  const res = await supabaseRequest(query, { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch app_state failed:', key, errorText);
+    return null;
+  }
+
+  const rows = (await res.json()) as RemoteAppStateRow[];
+  if (!rows.length) return null;
+  return (rows[0].value ?? null) as T | null;
+}
+
+async function upsertRemoteAppState<T>(key: string, value: T): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const res = await supabaseRequest('/rest/v1/app_state?on_conflict=key', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      key,
+      value,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase upsert app_state failed:', key, errorText);
+    return false;
+  }
+
+  return true;
+}
+
+export async function fetchAppState<T>(key: string): Promise<T | null> {
+  return fetchRemoteAppState<T>(key);
+}
+
+export async function saveAppState<T>(key: string, value: T): Promise<boolean> {
+  return upsertRemoteAppState<T>(key, value);
 }
 
 async function upsertUserRemote(profile: UserProfile, balance: number, points: number): Promise<boolean> {
@@ -193,18 +245,33 @@ async function saveUsersMap(map: Record<string, PersistedUserRow>): Promise<void
 }
 
 export async function fetchSponsors(): Promise<Sponsor[]> {
+  const remoteSponsors = await fetchRemoteAppState<Sponsor[]>('sponsors');
+  if (remoteSponsors && remoteSponsors.length > 0) {
+    console.log('[DB] Using remote sponsors from Supabase app_state');
+    return remoteSponsors;
+  }
+
   console.log('[DB] Using local mock sponsors');
   return mockSponsors;
 }
 
-export async function upsertSponsor(_sponsor: Sponsor): Promise<boolean> {
-  console.log('[DB] upsertSponsor - local only, no remote DB');
-  return false;
+export async function upsertSponsor(sponsor: Sponsor): Promise<boolean> {
+  const currentSponsors = (await fetchRemoteAppState<Sponsor[]>('sponsors')) || [];
+  const existingIndex = currentSponsors.findIndex((item) => item.id === sponsor.id);
+
+  if (existingIndex >= 0) {
+    currentSponsors[existingIndex] = sponsor;
+  } else {
+    currentSponsors.push(sponsor);
+  }
+
+  return upsertRemoteAppState('sponsors', currentSponsors);
 }
 
-export async function removeSponsor(_sponsorId: string): Promise<boolean> {
-  console.log('[DB] removeSponsor - local only, no remote DB');
-  return false;
+export async function removeSponsor(sponsorId: string): Promise<boolean> {
+  const currentSponsors = (await fetchRemoteAppState<Sponsor[]>('sponsors')) || [];
+  const updatedSponsors = currentSponsors.filter((item) => item.id !== sponsorId);
+  return upsertRemoteAppState('sponsors', updatedSponsors);
 }
 
 export async function fetchWinners(): Promise<Winner[]> {
@@ -213,6 +280,12 @@ export async function fetchWinners(): Promise<Winner[]> {
 }
 
 export async function fetchGrandPrize(): Promise<GrandPrize> {
+  const remotePrize = await fetchRemoteAppState<GrandPrize>('grand_prize');
+  if (remotePrize) {
+    console.log('[DB] Using remote grand prize from Supabase app_state');
+    return remotePrize;
+  }
+
   console.log('[DB] Using local mock grand prize');
   return mockGrandPrize;
 }
@@ -313,35 +386,47 @@ export async function seedAllToSupabase(): Promise<SeedResult> {
     };
   }
 
-  // Se houver configuracao remota, mantemos estes dados locais por enquanto e
-  // consideramos apenas a parte de usuarios como sincronizada por upsertUser.
+  const sponsorsOk = await upsertRemoteAppState('sponsors', mockSponsors);
+  const grandPrizeOk = await upsertRemoteAppState('grand_prize', mockGrandPrize);
+
   return {
-    sponsors: { count: 0 },
+    sponsors: sponsorsOk ? { count: mockSponsors.length } : { count: 0, error: 'Falha ao gravar sponsors em app_state' },
     winners: { ok: true },
     leaderboard: { ok: true },
-    grandPrize: { ok: true },
+    grandPrize: grandPrizeOk ? { ok: true } : { ok: false, error: 'Falha ao gravar grand_prize em app_state' },
   };
 }
 
 export async function checkTablesExist(): Promise<{ missing: string[]; errors: Record<string, string> }> {
   if (!hasSupabaseConfig()) {
     return {
-      missing: ['users'],
+      missing: ['users', 'app_state'],
       errors: { config: 'Configure EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY (ou EXPO_PUBLIC_SUPABASE_KEY)' },
     };
   }
 
   try {
-    const res = await supabaseRequest('/rest/v1/users?select=email&limit=1', { method: 'GET' });
-    if (res.ok) return { missing: [], errors: {} };
+    const tables = [
+      { name: 'users', select: 'email' },
+      { name: 'app_state', select: 'key' },
+    ];
+    const missing: string[] = [];
+    const errors: Record<string, string> = {};
 
-    const text = await res.text();
-    const missing = /relation .*users.* does not exist|42P01|Could not find the table/i.test(text)
-      ? ['users']
-      : [];
-    return { missing, errors: { users: text || 'Falha ao verificar tabela users' } };
+    for (const table of tables) {
+      const res = await supabaseRequest(`/rest/v1/${table.name}?select=${table.select}&limit=1`, { method: 'GET' });
+      if (res.ok) continue;
+
+      const text = await res.text();
+      if (/relation .* does not exist|42P01|Could not find the table/i.test(text)) {
+        missing.push(table.name);
+      }
+      errors[table.name] = text || `Falha ao verificar tabela ${table.name}`;
+    }
+
+    return { missing, errors };
   } catch (error) {
-    return { missing: ['users'], errors: { users: String(error) } };
+    return { missing: ['users', 'app_state'], errors: { users: String(error), app_state: String(error) } };
   }
 }
 
@@ -376,4 +461,12 @@ create table if not exists public.users (
 
 create index if not exists users_cpf_idx on public.users (cpf);
 create index if not exists users_updated_at_idx on public.users (updated_at desc);
+
+create table if not exists public.app_state (
+  key text primary key,
+  value jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists app_state_updated_at_idx on public.app_state (updated_at desc);
 `;

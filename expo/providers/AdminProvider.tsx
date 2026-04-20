@@ -7,6 +7,8 @@ import { hashPin, verifyPin } from '@/lib/crypto';
 import { readDomainCache, writeDomainCache } from '@/lib/stateCache';
 import {
   fetchGrandPrize as dbFetchGrandPrize,
+  fetchAppState as dbFetchAppState,
+  saveAppState as dbSaveAppState,
   seedAllToSupabase,
   checkTablesExist,
   SETUP_SQL,
@@ -69,9 +71,19 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<CouponBatch[]>('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<CouponBatch[]>(ADMIN_CACHE_KEYS.COUPON_BATCHES);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.COUPON_BATCHES, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, remote);
+        return remote;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.COUPON_BATCHES);
       const value = stored ? JSON.parse(stored) as CouponBatch[] : [];
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, value);
+      if (value.length > 0) {
+        void dbSaveAppState(ADMIN_CACHE_KEYS.COUPON_BATCHES, value);
+      }
       return value;
     },
   });
@@ -82,9 +94,19 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<AdminNotification[]>('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<AdminNotification[]>(ADMIN_CACHE_KEYS.NOTIFICATIONS);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, remote);
+        return remote;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
       const value = stored ? JSON.parse(stored) as AdminNotification[] : [];
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, value);
+      if (value.length > 0) {
+        void dbSaveAppState(ADMIN_CACHE_KEYS.NOTIFICATIONS, value);
+      }
       return value;
     },
   });
@@ -95,10 +117,26 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<GrandPrize>('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<GrandPrize>(ADMIN_CACHE_KEYS.GRAND_PRIZE);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.GRAND_PRIZE, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, remote);
+        return remote;
+      }
+
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.GRAND_PRIZE);
+      if (stored) {
+        const local = JSON.parse(stored) as GrandPrize;
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, local);
+        void dbSaveAppState(ADMIN_CACHE_KEYS.GRAND_PRIZE, local);
+        return local;
+      }
+
       console.log('[AdminProvider] Fetching grand prize from Supabase...');
       const result = await dbFetchGrandPrize();
       console.log('[AdminProvider] Got grand prize:', result.title);
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, result);
+      void dbSaveAppState(ADMIN_CACHE_KEYS.GRAND_PRIZE, result);
       return result;
     },
     staleTime: 5 * 60 * 1000,
@@ -111,9 +149,19 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<Record<string, GrandPrize>>('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<Record<string, GrandPrize>>(ADMIN_CACHE_KEYS.CITY_PRIZES);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.CITY_PRIZES, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, remote);
+        return remote;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.CITY_PRIZES);
       const value = stored ? JSON.parse(stored) as Record<string, GrandPrize> : {};
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, value);
+      if (Object.keys(value).length > 0) {
+        void dbSaveAppState(ADMIN_CACHE_KEYS.CITY_PRIZES, value);
+      }
       return value;
     },
   });
@@ -124,9 +172,19 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<Record<string, string>>('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<Record<string, string>>(ADMIN_CACHE_KEYS.CITY_IMAGES);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.CITY_IMAGES, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, remote);
+        return remote;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.CITY_IMAGES);
       const value = stored ? JSON.parse(stored) as Record<string, string> : {};
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, value);
+      if (Object.keys(value).length > 0) {
+        void dbSaveAppState(ADMIN_CACHE_KEYS.CITY_IMAGES, value);
+      }
       return value;
     },
   });
@@ -137,9 +195,19 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<ManagedCity[]>('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<ManagedCity[]>(ADMIN_CACHE_KEYS.MANAGED_CITIES);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.MANAGED_CITIES, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, remote);
+        return remote;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.MANAGED_CITIES);
       const value = stored ? JSON.parse(stored) as ManagedCity[] : [];
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, value);
+      if (value.length > 0) {
+        void dbSaveAppState(ADMIN_CACHE_KEYS.MANAGED_CITIES, value);
+      }
       return value;
     },
   });
@@ -178,9 +246,19 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
       const cached = await readDomainCache<PromotionalQR[]>('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, ADMIN_CACHE_TTL_MS);
       if (cached) return cached;
 
+      const remote = await dbFetchAppState<PromotionalQR[]>(ADMIN_CACHE_KEYS.PROMO_QR_CODES);
+      if (remote) {
+        await AsyncStorage.setItem(STORAGE_KEYS.PROMO_QR_CODES, JSON.stringify(remote));
+        await writeDomainCache('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, remote);
+        return remote;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.PROMO_QR_CODES);
       const value = stored ? JSON.parse(stored) as PromotionalQR[] : [];
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, value);
+      if (value.length > 0) {
+        void dbSaveAppState(ADMIN_CACHE_KEYS.PROMO_QR_CODES, value);
+      }
       return value;
     },
   });
@@ -205,6 +283,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (batches: CouponBatch[]) => {
       await AsyncStorage.setItem(STORAGE_KEYS.COUPON_BATCHES, JSON.stringify(batches));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, batches);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.COUPON_BATCHES, batches);
       return batches;
     },
     onSuccess: (data) => {
@@ -217,6 +296,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (notifs: AdminNotification[]) => {
       await AsyncStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifs));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, notifs);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.NOTIFICATIONS, notifs);
       return notifs;
     },
     onSuccess: (data) => {
@@ -229,6 +309,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (prize: GrandPrize) => {
       await AsyncStorage.setItem(STORAGE_KEYS.GRAND_PRIZE, JSON.stringify(prize));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, prize);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.GRAND_PRIZE, prize);
       return prize;
     },
     onSuccess: (data) => {
@@ -241,6 +322,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (prizes: Record<string, GrandPrize>) => {
       await AsyncStorage.setItem(STORAGE_KEYS.CITY_PRIZES, JSON.stringify(prizes));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, prizes);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.CITY_PRIZES, prizes);
       return prizes;
     },
     onSuccess: (data) => {
@@ -253,6 +335,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (codes: PromotionalQR[]) => {
       await AsyncStorage.setItem(STORAGE_KEYS.PROMO_QR_CODES, JSON.stringify(codes));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, codes);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.PROMO_QR_CODES, codes);
       return codes;
     },
     onSuccess: (data) => {
@@ -265,6 +348,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (images: Record<string, string>) => {
       await AsyncStorage.setItem(STORAGE_KEYS.CITY_IMAGES, JSON.stringify(images));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, images);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.CITY_IMAGES, images);
       return images;
     },
     onSuccess: (data) => {
@@ -277,6 +361,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     mutationFn: async (cities: ManagedCity[]) => {
       await AsyncStorage.setItem(STORAGE_KEYS.MANAGED_CITIES, JSON.stringify(cities));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, cities);
+      await dbSaveAppState(ADMIN_CACHE_KEYS.MANAGED_CITIES, cities);
       return cities;
     },
     onSuccess: (data) => {

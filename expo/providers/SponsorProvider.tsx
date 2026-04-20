@@ -7,6 +7,7 @@ import { Sponsor } from '@/types';
 import { useAuth } from '@/providers/AuthProvider';
 import { readDomainCache, writeDomainCache, invalidateDomainKey } from '@/lib/stateCache';
 import {
+  saveAppState as dbSaveAppState,
   fetchSponsors as dbFetchSponsors,
   upsertSponsor as dbUpsertSponsor,
   removeSponsor as dbRemoveSponsor,
@@ -66,6 +67,7 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
         const parsed = JSON.parse(local) as Sponsor[];
         if (parsed.length > 0) {
           await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, parsed);
+          void dbSaveAppState(SPONSOR_CACHE_KEYS.SPONSORS, parsed);
           return parsed;
         }
       }
@@ -215,6 +217,7 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     mutationFn: async (newSponsors: Sponsor[]) => {
       await AsyncStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(newSponsors));
       await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, newSponsors);
+      await dbSaveAppState(SPONSOR_CACHE_KEYS.SPONSORS, newSponsors);
       return newSponsors;
     },
     onSuccess: (data) => {

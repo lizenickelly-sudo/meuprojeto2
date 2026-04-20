@@ -1,44 +1,11 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback } from 'react';
 import { ReactNode } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
 import { UserProvider, useUser } from '@/providers/UserProvider';
 import { SponsorProvider, useSponsor } from '@/providers/SponsorProvider';
 import { AdminProvider, useAdmin } from '@/providers/AdminProvider';
 import { CouponProvider, useCoupon } from '@/providers/CouponProvider';
 import { NotificationProvider, useNotifications } from '@/providers/NotificationProvider';
-import { useAuth } from '@/providers/AuthProvider';
-import { flushSyncQueue } from '@/lib/offlineSyncQueue';
 import { Coupon, Transaction } from '@/types';
-
-function StateSyncRuntime() {
-  const { isLoggedIn } = useAuth();
-
-  useEffect(() => {
-    if (!isLoggedIn) return;
-
-    const runFlush = () => {
-      flushSyncQueue().catch((error) => {
-        console.log('[AppProvider] Sync queue flush failed:', error);
-      });
-    };
-
-    runFlush();
-
-    const intervalId = setInterval(runFlush, 30000);
-    const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active') {
-        runFlush();
-      }
-    });
-
-    return () => {
-      clearInterval(intervalId);
-      appStateSub.remove();
-    };
-  }, [isLoggedIn]);
-
-  return null;
-}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   return (
@@ -47,7 +14,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         <AdminProvider>
           <CouponProvider>
             <NotificationProvider>
-              <StateSyncRuntime />
               {children}
             </NotificationProvider>
           </CouponProvider>
