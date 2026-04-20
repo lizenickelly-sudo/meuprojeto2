@@ -40,14 +40,15 @@
           "origin": "https://rork.com/"
         }
       ],
-[
+      [
         "expo-camera",
         {
           "cameraPermission": "Permitir acesso à câmera para escanear QR Codes de cupons."
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

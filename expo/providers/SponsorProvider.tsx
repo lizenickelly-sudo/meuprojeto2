@@ -23,7 +23,7 @@ const STORAGE_KEYS = {
   SPONSOR_STARS: 'cashboxpix_sponsor_stars',
 };
 
-const SPONSORS_CACHE_VERSION = '3';
+const SPONSORS_CACHE_VERSION = '4';
 const SPONSOR_CACHE_TTL_MS = 1000 * 60 * 20;
 
 const SPONSOR_CACHE_KEYS = {
@@ -48,13 +48,6 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   const sponsorsQuery = useQuery({
     queryKey: ['sponsors'],
     queryFn: async () => {
-      const cachedSponsors = await readDomainCache<Sponsor[]>(
-        'sponsor',
-        SPONSOR_CACHE_KEYS.SPONSORS,
-        SPONSOR_CACHE_TTL_MS,
-      );
-      if (cachedSponsors && cachedSponsors.length > 0) return cachedSponsors;
-
       const version = await AsyncStorage.getItem(STORAGE_KEYS.SPONSORS_VERSION);
       if (version !== SPONSORS_CACHE_VERSION) {
         await AsyncStorage.removeItem(STORAGE_KEYS.SPONSORS);
@@ -62,21 +55,32 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
         await invalidateDomainKey('sponsor', SPONSOR_CACHE_KEYS.SPONSORS);
       }
 
+      const cachedSponsors = await readDomainCache<Sponsor[]>(
+        'sponsor',
+        SPONSOR_CACHE_KEYS.SPONSORS,
+        SPONSOR_CACHE_TTL_MS,
+      );
+      if (cachedSponsors && cachedSponsors.length > 0) return cachedSponsors;
+
+      console.log('[SponsorProvider] Fetching sponsors from Supabase...');
+      const remoteSponsors = await dbFetchSponsors();
+      console.log('[SponsorProvider] Got', remoteSponsors.length, 'sponsors');
+      if (remoteSponsors.length > 0) {
+        await AsyncStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(remoteSponsors));
+        await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, remoteSponsors);
+        return remoteSponsors;
+      }
+
       const local = await AsyncStorage.getItem(STORAGE_KEYS.SPONSORS);
       if (local) {
         const parsed = JSON.parse(local) as Sponsor[];
         if (parsed.length > 0) {
           await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, parsed);
-          void dbSaveAppState(SPONSOR_CACHE_KEYS.SPONSORS, parsed);
           return parsed;
         }
       }
-      console.log('[SponsorProvider] Fetching sponsors from Supabase...');
-      const result = await dbFetchSponsors();
-      console.log('[SponsorProvider] Got', result.length, 'sponsors');
-      await AsyncStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(result));
-      await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, result);
-      return result;
+
+      return [];
     },
     enabled: true,
     staleTime: 5 * 60 * 1000,
@@ -178,7 +182,9 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
-        console.log('[SponsorProvider] App resumed - reloading liked/shared offers from disk');
+        console.log('[SponsorProvider] App resumed - refreshing sponsors and engagement state');
+        void invalidateDomainKey('sponsor', SPONSOR_CACHE_KEYS.SPONSORS);
+        queryClient.invalidateQueries({ queryKey: ['sponsors'] });
         queryClient.invalidateQueries({ queryKey: ['liked_offers'] });
         queryClient.invalidateQueries({ queryKey: ['shared_offers'] });
         queryClient.invalidateQueries({ queryKey: ['liked_sponsors'] });

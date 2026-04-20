@@ -12,6 +12,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -50,6 +51,7 @@ import {
   Building2,
   Map,
   Eye,
+  PlayCircle,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
@@ -57,6 +59,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import Colors from '@/constants/colors';
+import { formatVideoDuration, uploadSponsorPromotionalVideo } from '@/lib/sponsorMedia';
 import { CITIES_BY_STATE, STATES } from '@/mocks/cities';
 import { useAdmin } from '@/providers/AdminProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
@@ -65,9 +68,11 @@ import { useUser } from '@/providers/UserProvider';
 import { mockWinners, mockGrandPrize } from '@/mocks/winners';
 import { hasTableMissingError, hasConfigError } from '@/services/database';
 import { Database, Sprout, AlertTriangle } from 'lucide-react-native';
-import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, GrandPrize, PromotionalQR, ManagedCity } from '@/types';
+import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, SponsorVideo, GrandPrize, PromotionalQR, ManagedCity } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
+const MAX_PROMOTIONAL_VIDEOS = 5;
+const MAX_PROMOTIONAL_VIDEO_BYTES = 50 * 1024 * 1024;
 
 type MainTab = 'overview' | 'states' | 'cities';
 type CitySubTab = 'prize' | 'sponsors' | 'coupons' | 'notifications' | 'promoqr';
@@ -152,6 +157,7 @@ interface SponsorFormData {
   latitude: string;
   longitude: string;
   galleryImages: SponsorImage[];
+  promotionalVideos: SponsorVideo[];
   offers: OfferFormItem[];
 }
 
@@ -171,6 +177,7 @@ const emptySponsorForm: SponsorFormData = {
   latitude: '-23.5505',
   longitude: '-46.6333',
   galleryImages: [],
+  promotionalVideos: [],
   offers: [],
 };
 
@@ -179,18 +186,22 @@ function SponsorFormModal({
   onClose,
   onSave,
   initialData,
+  sponsorId,
   title,
 }: {
   visible: boolean;
   onClose: () => void;
   onSave: (data: SponsorFormData) => void;
   initialData: SponsorFormData;
+  sponsorId: string;
   title: string;
 }) {
   const [form, setForm] = useState<SponsorFormData>(initialData);
   const insets = useSafeAreaInsets();
   const [newImgPrice, setNewImgPrice] = useState<string>('');
   const [newImgLabel, setNewImgLabel] = useState<string>('');
+  const [newVideoTitle, setNewVideoTitle] = useState<string>('');
+  const [uploadingVideo, setUploadingVideo] = useState<boolean>(false);
   const [editingOfferIdx, setEditingOfferIdx] = useState<number | null>(null);
   const [offerTitle, setOfferTitle] = useState<string>('');
   const [offerDesc, setOfferDesc] = useState<string>('');
@@ -198,7 +209,7 @@ function SponsorFormModal({
   const [offerImageUrl, setOfferImageUrl] = useState<string>('');
   const [loadingLocation, setLoadingLocation] = useState<boolean>(false);
 
-  const updateField = useCallback((key: keyof SponsorFormData, value: string | boolean | SponsorImage[] | OfferFormItem[]) => {
+  const updateField = useCallback((key: keyof SponsorFormData, value: string | boolean | SponsorImage[] | SponsorVideo[] | OfferFormItem[]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
@@ -282,7 +293,59 @@ function SponsorFormModal({
     updateField('galleryImages', form.galleryImages.filter((img) => img.id !== imgId));
   }, [form.galleryImages, updateField]);
 
+  const handleRemovePromotionalVideo = useCallback((videoId: string) => {
+    updateField('promotionalVideos', form.promotionalVideos.filter((video) => video.id !== videoId));
+  }, [form.promotionalVideos, updateField]);
+
+  const pickPromotionalVideo = useCallback(async () => {
+    if (uploadingVideo) return;
+
+    if (form.promotionalVideos.length >= MAX_PROMOTIONAL_VIDEOS) {
+      Alert.alert('Limite', `Maximo de ${MAX_PROMOTIONAL_VIDEOS} videos por patrocinador`);
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    if (asset.fileSize && asset.fileSize > MAX_PROMOTIONAL_VIDEO_BYTES) {
+      Alert.alert('Arquivo muito grande', 'Escolha um video de ate 50 MB para upload');
+      return;
+    }
+
+    try {
+      setUploadingVideo(true);
+      const uploadedVideo = await uploadSponsorPromotionalVideo({
+        sponsorId: sponsorId || form.name.trim() || `draft_${Date.now()}`,
+        fileUri: asset.uri,
+        fileName: asset.fileName || undefined,
+        mimeType: asset.mimeType || undefined,
+        title: newVideoTitle.trim() || undefined,
+        durationSeconds: asset.duration ? asset.duration / 1000 : undefined,
+      });
+
+      updateField('promotionalVideos', [...form.promotionalVideos, uploadedVideo]);
+      setNewVideoTitle('');
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert('Falha no upload', error instanceof Error ? error.message : 'Nao foi possivel enviar o video para o Supabase');
+    } finally {
+      setUploadingVideo(false);
+    }
+  }, [form.name, form.promotionalVideos, newVideoTitle, sponsorId, updateField, uploadingVideo]);
+
   const handleSave = useCallback(() => {
+    if (uploadingVideo) {
+      Alert.alert('Upload em andamento', 'Aguarde a conclusao do upload do video antes de salvar');
+      return;
+    }
     if (!form.name.trim()) {
       Alert.alert('Erro', 'Nome e obrigatorio');
       return;
@@ -292,7 +355,7 @@ function SponsorFormModal({
       return;
     }
     onSave(form);
-  }, [form, onSave]);
+  }, [form, onSave, uploadingVideo]);
 
   const resetOfferFields = useCallback(() => {
     setEditingOfferIdx(null);
@@ -363,6 +426,8 @@ function SponsorFormModal({
       setForm(initialData);
       setNewImgPrice('');
       setNewImgLabel('');
+      setNewVideoTitle('');
+      setUploadingVideo(false);
       resetOfferFields();
     }
   }, [visible, initialData, resetOfferFields]);
@@ -441,6 +506,55 @@ function SponsorFormModal({
                 </View>
               </TouchableOpacity>
             </View>
+          </View>
+
+          <View style={fm.section}>
+            <Text style={fm.sectionTitle}>Videos Promocionais ({form.promotionalVideos.length}/{MAX_PROMOTIONAL_VIDEOS})</Text>
+            <Text style={fm.sectionSub}>Envie videos da loja para salvar no Supabase e exibir no perfil publico</Text>
+            {form.promotionalVideos.map((video) => (
+              <View key={video.id} style={fm.videoItem}>
+                <View style={fm.videoThumbPlaceholder}>
+                  <PlayCircle size={20} color={Colors.dark.neonGreen} />
+                </View>
+                <View style={fm.videoInfo}>
+                  <Text style={fm.videoTitle} numberOfLines={1}>{video.title || video.fileName || 'Video promocional'}</Text>
+                  <Text style={fm.videoMeta} numberOfLines={1}>
+                    {formatVideoDuration(video.durationSeconds)}
+                    {video.fileName ? ` • ${video.fileName}` : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => handleRemovePromotionalVideo(video.id)} style={fm.galleryRemove}>
+                  <X size={14} color={Colors.dark.danger} />
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            {form.promotionalVideos.length < MAX_PROMOTIONAL_VIDEOS && (
+              <View style={fm.addImgSection}>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Titulo do Video (opcional)</Text>
+                  <TextInput
+                    style={fm.input}
+                    value={newVideoTitle}
+                    onChangeText={setNewVideoTitle}
+                    placeholder="Ex: Tour da loja, ofertas da semana"
+                    placeholderTextColor={Colors.dark.textMuted}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[fm.addVideoBtn, uploadingVideo && fm.addVideoBtnDisabled]}
+                  onPress={pickPromotionalVideo}
+                  activeOpacity={0.8}
+                  disabled={uploadingVideo}
+                >
+                  {uploadingVideo ? <ActivityIndicator color="#000" size="small" /> : <PlayCircle size={16} color="#000" />}
+                  <Text style={[fm.addVideoBtnTxt, uploadingVideo && fm.addVideoBtnTxtDisabled]}>
+                    {uploadingVideo ? 'Enviando video...' : 'Escolher e enviar video'}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={fm.videoHint}>Bucket esperado no Supabase Storage: sponsor-videos (ou EXPO_PUBLIC_SUPABASE_SPONSOR_VIDEO_BUCKET)</Text>
+              </View>
+            )}
           </View>
 
           <View style={fm.section}>
@@ -649,6 +763,16 @@ const fm = StyleSheet.create({
   addImgSection: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.dark.cardBorder },
   addImgBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed' as const, borderColor: Colors.dark.neonGreen, marginTop: 4 },
   addImgBtnTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '600' as const },
+  videoItem: { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: Colors.dark.surfaceLight, borderRadius: 10, padding: 8, marginBottom: 8, gap: 10 },
+  videoThumbPlaceholder: { width: 48, height: 48, borderRadius: 10, backgroundColor: Colors.dark.inputBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  videoInfo: { flex: 1 },
+  videoTitle: { color: Colors.dark.text, fontSize: 13, fontWeight: '700' as const },
+  videoMeta: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+  addVideoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.dark.neonGreen, paddingVertical: 12, borderRadius: 10 },
+  addVideoBtnDisabled: { opacity: 0.7 },
+  addVideoBtnTxt: { color: '#000', fontSize: 13, fontWeight: '700' as const },
+  addVideoBtnTxtDisabled: { color: '#000' },
+  videoHint: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 8, lineHeight: 16 },
   offerItem: { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: Colors.dark.surfaceLight, borderRadius: 10, padding: 8, marginBottom: 8, gap: 10 },
   offerThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: Colors.dark.inputBg },
   offerThumbPlaceholder: { alignItems: 'center' as const, justifyContent: 'center' as const },
@@ -1419,6 +1543,7 @@ export default function AdminPanel() {
 
   const [showSponsorModal, setShowSponsorModal] = useState<boolean>(false);
   const [editingSponsor, setEditingSponsor] = useState<Sponsor | null>(null);
+  const [sponsorDraftId, setSponsorDraftId] = useState<string>('');
   const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
   const [previewBatch, setPreviewBatch] = useState<CouponBatch | null>(null);
   const [showCouponPreview, setShowCouponPreview] = useState<boolean>(false);
@@ -1548,6 +1673,7 @@ export default function AdminPanel() {
         latitude: editingSponsor.latitude.toString(),
         longitude: editingSponsor.longitude.toString(),
         galleryImages: editingSponsor.galleryImages ?? [],
+        promotionalVideos: editingSponsor.promotionalVideos ?? [],
         offers: (editingSponsor.offers ?? []).map((o) => ({
           id: o.id,
           title: o.title,
@@ -1565,20 +1691,23 @@ export default function AdminPanel() {
   }, [editingSponsor, selectedCity, cities]);
 
   const handleOpenAdd = useCallback(() => {
+    setSponsorDraftId(`s_${Date.now()}`);
     setEditingSponsor(null);
     setShowSponsorModal(true);
   }, []);
 
   const handleOpenEdit = useCallback((sponsor: Sponsor) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSponsorDraftId(sponsor.id);
     setEditingSponsor(sponsor);
     setShowSponsorModal(true);
   }, []);
 
   const handleSaveSponsor = useCallback((data: SponsorFormData) => {
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const resolvedSponsorId = sponsorDraftId || editingSponsor?.id || `s_${Date.now()}`;
     const sponsorData: Sponsor = {
-      id: editingSponsor?.id ?? `s_${Date.now()}`,
+      id: resolvedSponsorId,
       name: data.name.trim(),
       category: data.category.trim(),
       imageUrl: data.imageUrl.trim() || 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=400',
@@ -1595,7 +1724,7 @@ export default function AdminPanel() {
       couponValue: parseFloat(data.couponValue) || 0,
       offers: data.offers.map((o) => ({
         id: o.id,
-        sponsorId: editingSponsor?.id ?? `s_${Date.now()}`,
+        sponsorId: resolvedSponsorId,
         sponsorName: data.name.trim(),
         title: o.title,
         description: o.description,
@@ -1607,6 +1736,7 @@ export default function AdminPanel() {
       })),
       stories: editingSponsor?.stories ?? [],
       galleryImages: data.galleryImages,
+      promotionalVideos: data.promotionalVideos,
     };
     addManagedCity({
       id: `city_${Date.now()}`,
@@ -1623,7 +1753,8 @@ export default function AdminPanel() {
     }
     setShowSponsorModal(false);
     setEditingSponsor(null);
-  }, [editingSponsor, updateSponsor, addSponsor, addManagedCity]);
+    setSponsorDraftId('');
+  }, [editingSponsor, sponsorDraftId, updateSponsor, addSponsor, addManagedCity]);
 
   const handleSaveManagedCity = useCallback(() => {
     const city = newCityName.trim();
@@ -2901,9 +3032,10 @@ export default function AdminPanel() {
 
       <SponsorFormModal
         visible={showSponsorModal}
-        onClose={() => { setShowSponsorModal(false); setEditingSponsor(null); }}
+        onClose={() => { setShowSponsorModal(false); setEditingSponsor(null); setSponsorDraftId(''); }}
         onSave={handleSaveSponsor}
         initialData={sponsorFormData}
+        sponsorId={sponsorDraftId}
         title={editingSponsor ? 'Editar Patrocinador' : 'Novo Patrocinador'}
       />
 

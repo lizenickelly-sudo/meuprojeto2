@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform, Linking } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import { MapPin, Phone, BadgeCheck, Navigation, Grid3x3, ShoppingBag, Heart, MessageCircle, Share2, MessageSquare } from 'lucide-react-native';
 import Colors from '@/constants/colors';
+import SponsorPromoVideoCard from '@/components/SponsorPromoVideoCard';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useUser } from '@/providers/UserProvider';
 import OfferDetailModal from '@/components/OfferDetailModal';
@@ -34,7 +35,6 @@ function openDirections(lat: number, lon: number, label: string) {
 export default function SponsorDetailScreen() {
   console.log("[SponsorDetail] Sponsor detail initialized");
   const { sponsorId } = useLocalSearchParams<{ sponsorId: string }>();
-  const router = useRouter();
   const { sponsors, toggleLikeOffer: rawToggleLike, shareOffer: rawShare, addOfferComment, isOfferLiked, isOfferShared } = useSponsor();
   const { addPoints } = useUser();
   const sponsor = sponsors.find((s) => s.id === sponsorId);
@@ -106,6 +106,7 @@ export default function SponsorDetailScreen() {
 
   const totalLikes = sponsor.offers.reduce((sum, o) => sum + (o.likes || 0), 0);
   const products = sponsor.galleryImages || [];
+  const promoVideos = sponsor.promotionalVideos || [];
 
   return (
     <View style={d.ctr}>
@@ -161,6 +162,17 @@ export default function SponsorDetailScreen() {
             </View>
           </View>
         </View>
+
+        {promoVideos.length > 0 && (
+          <View style={d.videosSection}>
+            <Text style={d.sectionTitle}>Videos Promocionais</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={d.videoList}>
+              {promoVideos.map((video) => (
+                <SponsorPromoVideoCard key={video.id} sponsorName={sponsor.name} video={video} />
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         <View style={d.tabBar}>
           <TouchableOpacity
@@ -373,6 +385,14 @@ const d = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 8,
     elevation: 6,
+  },
+  videosSection: {
+    paddingTop: 2,
+  },
+  videoList: {
+    paddingHorizontal: 12,
+    paddingBottom: 14,
+    gap: 12,
   },
 
   tabBar: {

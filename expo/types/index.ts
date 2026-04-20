@@ -48,6 +48,17 @@ export interface SponsorImage {
   label?: string;
 }
 
+export interface SponsorVideo {
+  id: string;
+  url: string;
+  storagePath?: string;
+  title?: string;
+  fileName?: string;
+  mimeType?: string;
+  durationSeconds?: number;
+  createdAt: string;
+}
+
 export interface Sponsor {
   id: string;
   name: string;
@@ -68,6 +79,7 @@ export interface Sponsor {
   couponValue?: number;
   stories?: SponsorStory[];
   galleryImages?: SponsorImage[];
+  promotionalVideos?: SponsorVideo[];
 }
 
 export interface SponsorStory {
