@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Colors from '@/constants/colors';
+import { hasPendingUserVerification, isUserVerificationApproved } from '@/lib/userVerification';
 import { useUser } from '@/providers/UserProvider';
 import { useCoupon } from '@/providers/CouponProvider';
 import { useAdmin } from '@/providers/AdminProvider';
@@ -164,6 +165,8 @@ export default function WalletScreen() {
   const [customLotteryNumber, setCustomLotteryNumber] = useState<string>('');
   const [selectedDrawId, setSelectedDrawId] = useState<string>('');
   const [sharedPromotions, setSharedPromotions] = useState<Array<{ id: string; title: string; likes: number; shares: number; sharedAt: string }>>([]);
+  const isIdentityVerified = useMemo(() => isUserVerificationApproved(profile), [profile.isActive, profile.adminReviewStatus]);
+  const hasPendingIdentityVerification = useMemo(() => hasPendingUserVerification(profile), [profile.isActive, profile.adminReviewStatus, profile.selfieUrl, profile.documentUrl, profile.cpf]);
 
   const currentCityPrize = profile.city ? cityPrizes[profile.city]?.value : undefined;
   const totalPrizeValue = useMemo(() => {
@@ -429,10 +432,29 @@ export default function WalletScreen() {
           </LinearGradient>
         </View>
 
-        {profile.identityVerified && (
+        {isIdentityVerified && (
           <View style={w.verifiedBanner}>
             <CheckCircle size={16} color={Colors.dark.success} />
             <Text style={w.verifiedTxt}>Identidade verificada</Text>
+          </View>
+        )}
+
+        {!isIdentityVerified && (
+          <View style={w.verifyBanner}>
+            <Shield size={16} color={Colors.dark.warning} />
+            <View style={w.verifyInfo}>
+              <Text style={w.verifyTtl}>{hasPendingIdentityVerification ? 'Verificação em análise' : 'Verificação pendente'}</Text>
+              <Text style={w.verifySub}>{hasPendingIdentityVerification ? 'Documentos enviados. A carteira será liberada quando o admin ativar a conta.' : 'Verifique sua identidade para liberar a conta e os saques.'}</Text>
+            </View>
+            {hasPendingIdentityVerification ? (
+              <View style={[w.verifyBtn, w.verifyBtnDisabled]}>
+                <Text style={[w.verifyBtnTxt, w.verifyBtnTxtDisabled]}>Em análise</Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={w.verifyBtn} onPress={handleVerify} activeOpacity={0.8}>
+                <Text style={w.verifyBtnTxt}>Verificar</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -698,6 +720,8 @@ const w = StyleSheet.create({
   verifySub: { color: Colors.dark.textSecondary, fontSize: 11, marginTop: 1 },
   verifyBtn: { backgroundColor: Colors.dark.warning, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
   verifyBtnTxt: { color: '#000', fontSize: 12, fontWeight: '700' as const },
+  verifyBtnDisabled: { backgroundColor: 'rgba(245,158,11,0.18)' },
+  verifyBtnTxtDisabled: { color: Colors.dark.warning },
   verifiedBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, backgroundColor: 'rgba(16,185,129,0.08)', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: 'rgba(16,185,129,0.15)' },
   verifiedTxt: { color: Colors.dark.success, fontSize: 13, fontWeight: '600' as const },
   statsR: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginTop: 16 },

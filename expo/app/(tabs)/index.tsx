@@ -19,7 +19,6 @@ import {
   DollarSign,
   Heart,
   Star,
-  PlayCircle,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
@@ -340,17 +339,9 @@ export default function HomeScreen() {
     return citySponsors.flatMap((sp) => sp.offers);
   }, [citySponsors]);
 
-  const cityReelsCount = useMemo(() => {
-    return citySponsors.reduce((total, sponsor) => total + (sponsor.promotionalVideos?.length || 0), 0);
-  }, [citySponsors]);
-
-  const allOffers = useMemo(() => {
-    return sponsors.flatMap((sp) => sp.offers);
-  }, [sponsors]);
-
   const hasCityStores = citySponsors.length > 0;
   const hasCityOffers = cityOffers.length > 0;
-  const hasAnyOffers = allOffers.length > 0;
+  const shouldShowCityPromotions = Boolean(userCity && hasCityOffers);
   const shouldShowWelcomeSplash = Platform.OS !== 'web';
   const [showSplash, setShowSplash] = useState<boolean>(shouldShowWelcomeSplash);
   const [splashEmail, setSplashEmail] = useState<string>('');
@@ -377,11 +368,6 @@ export default function HomeScreen() {
   const handleScan = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     router.push('/(tabs)/scanner');
-  }, [router]);
-
-  const handleOpenReels = useCallback(() => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/reels');
   }, [router]);
 
   const handleSponsorPress = useCallback((sponsorId: string) => {
@@ -438,10 +424,9 @@ export default function HomeScreen() {
 
         <WinnerTicker />
 
-        {hasAnyOffers && (
+        {shouldShowCityPromotions && (
           <PromotionalFeed
-            onGoToStore={handleSponsorPress}
-            userCity={hasCityOffers ? (userCity || undefined) : undefined}
+            userCity={userCity || undefined}
           />
         )}
 
@@ -450,17 +435,6 @@ export default function HomeScreen() {
             <LinearGradient colors={['#F97316', '#EA580C']} style={s.quickGrad}>
               <ScanLine size={22} color="#000" />
               <Text style={s.quickTxt}>ESCANEAR CUPOM</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.quickBtn, s.quickBtnDark]} onPress={handleOpenReels} activeOpacity={0.8}>
-            <LinearGradient colors={['#111827', '#030712']} style={s.quickGradAlt}>
-              <PlayCircle size={22} color={Colors.dark.primary} />
-              <View>
-                <Text style={s.quickTxtAlt}>REELS DA CIDADE</Text>
-                <Text style={s.quickSubTxtAlt}>
-                  {userCity ? (cityReelsCount > 0 ? `${cityReelsCount} videos ativos` : 'Sem videos por enquanto') : 'Defina sua cidade'}
-                </Text>
-              </View>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -512,12 +486,8 @@ const s = StyleSheet.create({
   balanceTxt: { color: Colors.dark.primary, fontSize: 14, fontWeight: '800' as const },
   quickRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 16 },
   quickBtn: { flex: 1, borderRadius: 14, overflow: 'hidden', shadowColor: '#F97316', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
-  quickBtnDark: { shadowColor: '#000', shadowOpacity: 0.22 },
   quickGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
   quickTxt: { color: '#FFF', fontSize: 14, fontWeight: '900' as const, letterSpacing: 0.5 },
-  quickGradAlt: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, paddingHorizontal: 16, gap: 10 },
-  quickTxtAlt: { color: '#FFF', fontSize: 12, fontWeight: '900' as const, letterSpacing: 0.5 },
-  quickSubTxtAlt: { color: 'rgba(255,255,255,0.68)', fontSize: 10, marginTop: 1, fontWeight: '600' as const },
   sponsorsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginTop: 4, marginBottom: 4 },
   sponsorsTitle: { color: Colors.dark.text, fontSize: 20, fontWeight: '800' as const },
   sponsorsSubTitle: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 1 },

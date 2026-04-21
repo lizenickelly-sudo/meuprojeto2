@@ -3,8 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { UserProfile, Transaction } from '@/types';
-import { upsertUser as dbUpsertUser } from '@/services/database';
+import { fetchUser as dbFetchUser, upsertUser as dbUpsertUser } from '@/services/database';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasSupabaseConfig, supabase } from '@/lib/supabase';
 
 function normalizeTransaction(raw: unknown): Transaction | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -104,11 +105,31 @@ export const [UserProvider, useUser] = createContextHook(() => {
       const keys = getUserStorageKeys(userEmail);
       console.log('[UserProvider] Loading profile for:', userEmail, 'key:', keys.USER_PROFILE);
       const stored = await AsyncStorage.getItem(keys.USER_PROFILE);
+      let cachedProfile: UserProfile | null = null;
+
       if (stored) {
-        const parsed = JSON.parse(stored) as UserProfile;
-        console.log('[UserProvider] Found stored profile:', parsed.name);
-        return parsed;
+        cachedProfile = JSON.parse(stored) as UserProfile;
+        console.log('[UserProvider] Found stored profile:', cachedProfile.name);
       }
+
+      const dbProfile = userEmail ? await dbFetchUser(userEmail) : null;
+      if (dbProfile) {
+        const mergedProfile: UserProfile = {
+          ...(cachedProfile ?? { ...defaultProfile, email: userEmail }),
+          ...dbProfile,
+          email: dbProfile.email || userEmail,
+          createdAt: dbProfile.createdAt || cachedProfile?.createdAt || new Date().toISOString(),
+        };
+
+        await AsyncStorage.setItem(keys.USER_PROFILE, JSON.stringify(mergedProfile));
+        console.log('[UserProvider] Using synced profile from database:', mergedProfile.name || mergedProfile.email);
+        return mergedProfile;
+      }
+
+      if (cachedProfile) {
+        return cachedProfile;
+      }
+
       console.log('[UserProvider] No profile found, returning default');
       return { ...defaultProfile, email: userEmail };
     },
@@ -174,17 +195,17 @@ export const [UserProvider, useUser] = createContextHook(() => {
         loaded.email = userEmail;
       }
 
-      // Preserve local optimistic verification/avatar updates from being overwritten by stale cache.
+      // Preserve media previews locally, but keep verification state sourced from persisted profile data.
       const merged: UserProfile = {
         ...loaded,
-        identityVerified: Boolean(profile.identityVerified || loaded.identityVerified),
+        identityVerified: Boolean(loaded.identityVerified),
         avatarUrl: profile.avatarUrl || loaded.avatarUrl,
         selfieUrl: profile.selfieUrl || loaded.selfieUrl,
       };
 
       setProfile(merged);
     }
-  }, [profileQuery.data, userEmail, profile.identityVerified, profile.avatarUrl, profile.selfieUrl]);
+  }, [profileQuery.data, userEmail, profile.avatarUrl, profile.selfieUrl]);
 
   useEffect(() => {
     if (balanceQuery.data !== undefined) setBalance(balanceQuery.data);
@@ -201,6 +222,34 @@ export const [UserProvider, useUser] = createContextHook(() => {
   useEffect(() => {
     if (referralQuery.data !== undefined) setReferralCount(referralQuery.data);
   }, [referralQuery.data]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !userEmail || !hasSupabaseConfig) return;
+
+    const normalizedEmail = userEmail.trim().toLowerCase();
+    const channel = supabase
+      .channel(`user-profile-${normalizedEmail}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'users',
+          filter: `email=eq.${normalizedEmail}`,
+        },
+        () => {
+          console.log('[UserProvider] Remote profile changed, refreshing current user profile:', normalizedEmail);
+          queryClient.refetchQueries({ queryKey: ['user_profile', normalizedEmail], exact: true });
+        },
+      )
+      .subscribe((status) => {
+        console.log('[UserProvider] Profile realtime status:', status, normalizedEmail);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isLoggedIn, queryClient, userEmail]);
 
   const saveProfileMutation = useMutation({
     mutationFn: async (newProfile: UserProfile) => {
@@ -328,6 +377,11 @@ export const [UserProvider, useUser] = createContextHook(() => {
     await saveProfileMutation.mutateAsync(p);
   }, [queryClient, userEmail, saveProfileMutation]);
 
+  const refreshProfile = useCallback(async () => {
+    if (!userEmail || !isLoggedIn) return;
+    await queryClient.refetchQueries({ queryKey: ['user_profile', userEmail], exact: true });
+  }, [queryClient, userEmail, isLoggedIn]);
+
   const addBalance = useCallback((amount: number) => {
     addBalanceMutation.mutate(amount);
   }, [addBalanceMutation]);
@@ -437,6 +491,7 @@ export const [UserProvider, useUser] = createContextHook(() => {
     transactions,
     isLoading,
     saveProfile,
+    refreshProfile,
     addBalance,
     addPoints,
     addTransaction,

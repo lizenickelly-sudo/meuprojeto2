@@ -15,7 +15,9 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { usePathname, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { X, Heart, MessageCircle, Share2, Bookmark, Send } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useSponsor } from '@/providers/SponsorProvider';
@@ -43,6 +45,11 @@ interface OfferComment {
   createdAt: string;
 }
 
+interface OfferModalEntry {
+  offer: Offer;
+  sponsor: Sponsor | null;
+}
+
 const OFFER_COMMENTS_KEY = 'cashboxpix_offer_comments_v1';
 
 export default function OfferDetailModal({
@@ -54,7 +61,9 @@ export default function OfferDetailModal({
   startWithComments = false,
   onClose,
 }: OfferDetailModalProps) {
-  const { toggleLikeOffer: rawToggleLike, shareOffer: rawShare, addOfferComment, isOfferLiked, isOfferShared } = useSponsor();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { sponsors, toggleLikeOffer: rawToggleLike, shareOffer: rawShare, addOfferComment, isOfferLiked, isOfferShared } = useSponsor();
   const { addPoints, profile } = useUser();
   const toggleLikeOffer = useCallback((offerId: string) => rawToggleLike(offerId, (pts) => addPoints(pts)), [rawToggleLike, addPoints]);
   const shareOfferFn = useCallback((offerId: string) => rawShare(offerId, (pts) => addPoints(pts)), [rawShare, addPoints]);
@@ -67,22 +76,54 @@ export default function OfferDetailModal({
   const [commentCount, setCommentCount] = useState<number>(0);
   const [shareCount, setShareCount] = useState<number>(0);
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [contentHeight, setContentHeight] = useState<number>(MODAL_MEDIA_HEIGHT + 180);
   const heartScale = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const offerPagerRef = useRef<FlatList>(null);
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null; isViewable?: boolean }[] }) => {
+    const nextItem = viewableItems.find((item) => item.isViewable && typeof item.index === 'number');
+    if (typeof nextItem?.index === 'number') {
+      setActiveIndex(nextItem.index);
+    }
+  }).current;
 
   const modalOffers = React.useMemo(() => {
     if (offerList && offerList.length > 0) return offerList;
     return offer ? [offer] : [];
   }, [offerList, offer]);
 
-  const currentOffer = modalOffers[activeIndex] || offer;
+  const modalEntries = React.useMemo<OfferModalEntry[]>(() => {
+    return modalOffers.map((entry) => ({
+      offer: entry,
+      sponsor: sponsors.find((item) => item.id === entry.sponsorId) || sponsor || null,
+    }));
+  }, [modalOffers, sponsors, sponsor]);
+
+  const currentEntry = modalEntries[activeIndex] || modalEntries[0] || null;
+  const currentOffer = currentEntry?.offer || offer;
+  const currentSponsor = currentEntry?.sponsor || sponsor;
+  const currentSponsorAddress = [currentSponsor?.address, currentSponsor ? `${currentSponsor.city} - ${currentSponsor.state}` : '']
+    .filter(Boolean)
+    .join(' • ');
 
   React.useEffect(() => {
-    if (visible && modalOffers.length > 0) {
-      const safeInitial = Math.min(Math.max(initialIndex, 0), modalOffers.length - 1);
+    if (visible && modalEntries.length > 0) {
+      const safeInitial = Math.min(Math.max(initialIndex, 0), modalEntries.length - 1);
       setActiveIndex(safeInitial);
     }
-  }, [visible, initialIndex, modalOffers.length]);
+  }, [visible, initialIndex, modalEntries.length]);
+
+  React.useEffect(() => {
+    if (!visible || modalEntries.length === 0 || contentHeight <= 0) return;
+
+    const safeInitial = Math.min(Math.max(initialIndex, 0), modalEntries.length - 1);
+    const timeoutId = setTimeout(() => {
+      offerPagerRef.current?.scrollToOffset({ offset: safeInitial * contentHeight, animated: false });
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [visible, initialIndex, modalEntries.length, contentHeight]);
 
   React.useEffect(() => {
     if (currentOffer) {
@@ -171,8 +212,21 @@ export default function OfferDetailModal({
     setIsSaved((prev) => !prev);
   }, []);
 
+  const handleOpenSponsor = useCallback(() => {
+    if (!currentSponsor?.id) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (pathname === '/sponsor-detail' && sponsor?.id === currentSponsor.id) {
+      onClose();
+      return;
+    }
+
+    onClose();
+    router.push({ pathname: '/sponsor-detail', params: { sponsorId: currentSponsor.id } });
+  }, [currentSponsor?.id, currentSponsor, onClose, pathname, router, sponsor?.id]);
+
   const handleSendComment = useCallback(() => {
-    if (!newComment.trim() || !currentOffer || !sponsor) return;
+    if (!newComment.trim() || !currentOffer || !currentSponsor) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const comment: OfferComment = {
       id: `c_${Date.now()}`,
@@ -205,7 +259,7 @@ export default function OfferDetailModal({
       .catch((error) => {
         console.log('[OfferDetailModal] Failed to persist comments:', error);
       });
-  }, [newComment, currentOffer, sponsor, addOfferComment, profile.name, profile.avatarUrl, profile.selfieUrl, comments]);
+  }, [newComment, currentOffer, currentSponsor, addOfferComment, profile.name, profile.avatarUrl, profile.selfieUrl, comments]);
 
   const toggleComments = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -228,104 +282,127 @@ export default function OfferDetailModal({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <View style={ms.handleBar}>
-          <View style={ms.handle} />
-        </View>
-
-        <View style={ms.topBar}>
-          <View style={ms.topBarLeft}>
-            <Image source={{ uri: currentOffer.imageUrl }} style={ms.sponsorMini} contentFit="cover" cachePolicy="memory-disk" placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }} transition={200} />
-            <View>
-              <Text style={ms.sponsorName} numberOfLines={1}>{currentOffer.sponsorName}</Text>
-              <Text style={ms.offerLocation}>Patrocinador</Text>
-            </View>
-          </View>
-          <TouchableOpacity onPress={onClose} style={ms.closeBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <X size={22} color={Colors.dark.text} />
-          </TouchableOpacity>
-        </View>
-
-        <Animated.View style={[ms.contentWrap, { opacity: slideAnim, transform: [{ translateY }] }]}>
+        <Animated.View
+          style={[ms.contentWrap, { opacity: slideAnim, transform: [{ translateY }] }]}
+          onLayout={(event) => {
+            const nextHeight = event.nativeEvent.layout.height;
+            if (nextHeight > 0 && Math.abs(nextHeight - contentHeight) > 1) {
+              setContentHeight(nextHeight);
+            }
+          }}
+        >
           {!showComments ? (
             <View style={ms.feedContainer}>
-              <View style={ms.imageWrap}>
-                <FlatList
-                  data={modalOffers}
-                  keyExtractor={(item) => item.id}
-                  horizontal={false}
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  showsVerticalScrollIndicator={false}
-                  snapToInterval={MODAL_MEDIA_HEIGHT}
-                  decelerationRate="fast"
-                  initialScrollIndex={Math.min(activeIndex, Math.max(0, modalOffers.length - 1))}
-                  getItemLayout={(_, index) => ({ length: MODAL_MEDIA_HEIGHT, offset: MODAL_MEDIA_HEIGHT * index, index })}
-                  onMomentumScrollEnd={(e) => {
-                    const idx = Math.round(e.nativeEvent.contentOffset.y / MODAL_MEDIA_HEIGHT);
-                    setActiveIndex(Math.min(Math.max(idx, 0), modalOffers.length - 1));
-                  }}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity activeOpacity={0.95} onPress={handleImagePress}>
-                      <View style={ms.imageWrap}>
-                        <Image source={{ uri: item.imageUrl }} style={ms.offerImage} contentFit="cover" cachePolicy="memory-disk" placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }} transition={400} />
-                        {item.discount && (
-                          <View style={ms.discountTag}>
-                            <Text style={ms.discountText}>{item.discount}</Text>
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                />
-                {modalOffers.length > 1 && (
+              <View style={ms.overlayTopControls}>
+                <TouchableOpacity onPress={onClose} style={ms.overlayCloseBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <X size={22} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              <FlatList
+                ref={offerPagerRef}
+                data={modalEntries}
+                keyExtractor={(item, index) => `${item.offer.id}-${index}`}
+                renderItem={({ item }) => (
+                  <TouchableOpacity activeOpacity={0.95} onPress={handleImagePress}>
+                    <View style={[ms.reelPage, { height: contentHeight }]}>
+                      <Image
+                        source={{ uri: item.offer.imageUrl }}
+                        style={ms.reelImage}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                        transition={400}
+                      />
+                      <LinearGradient
+                        colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.18)', 'rgba(0,0,0,0.84)']}
+                        style={ms.reelFade}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                )}
+                pagingEnabled
+                showsVerticalScrollIndicator={false}
+                decelerationRate="fast"
+                snapToAlignment="start"
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
+                getItemLayout={(_, index) => ({ length: contentHeight, offset: contentHeight * index, index })}
+                initialNumToRender={2}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+              />
+
+              {modalEntries.length > 1 && (
+                <View style={ms.hintWrap}>
+                  <View style={ms.hintChip}>
+                    <Text style={ms.hintText}>Deslize para cima para ver mais promoções</Text>
+                  </View>
+                </View>
+              )}
+
+              <View style={ms.overlayContent}>
+                <TouchableOpacity style={ms.overlaySponsorChip} onPress={handleOpenSponsor} activeOpacity={0.85}>
+                  <Image
+                    source={{ uri: currentSponsor?.logoUrl || currentSponsor?.imageUrl || currentOffer.imageUrl }}
+                    style={ms.overlaySponsorAvatar}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                    transition={200}
+                  />
+                  <View style={ms.overlaySponsorInfo}>
+                    <Text style={ms.overlaySponsorName} numberOfLines={1}>{currentSponsor?.name || currentOffer.sponsorName}</Text>
+                    <Text style={ms.overlaySponsorAddress} numberOfLines={2}>{currentSponsorAddress || 'Patrocinador parceiro'}</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {modalEntries.length > 1 && (
                   <View style={ms.carouselDots}>
-                    {modalOffers.map((_, idx) => (
+                    {modalEntries.map((_, idx) => (
                       <View key={`dot-${idx}`} style={[ms.dot, idx === activeIndex && ms.dotActive]} />
                     ))}
                   </View>
                 )}
-              </View>
 
-              <View style={ms.actionsRow}>
-                <View style={ms.actionsLeft}>
-                  <TouchableOpacity onPress={handleLike} style={ms.actionBtn} activeOpacity={0.7}>
-                    <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-                      <Heart
-                        size={26}
-                        color={isOfferLiked(currentOffer.id) ? '#EF4444' : Colors.dark.text}
-                        fill={isOfferLiked(currentOffer.id) ? '#EF4444' : 'transparent'}
-                      />
-                    </Animated.View>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={toggleComments} style={ms.actionBtn} activeOpacity={0.7}>
-                    <MessageCircle size={25} color={Colors.dark.text} />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleShare} style={ms.actionBtn} activeOpacity={0.7}>
-                    <Share2 size={24} color={isOfferShared(currentOffer.id) ? Colors.dark.neonGreen : Colors.dark.text} />
+                <View style={ms.actionsRow}>
+                  <View style={ms.actionsLeft}>
+                    <TouchableOpacity onPress={handleLike} style={ms.actionBtn} activeOpacity={0.7}>
+                      <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+                        <Heart
+                          size={26}
+                          color={isOfferLiked(currentOffer.id) ? '#EF4444' : '#FFFFFF'}
+                          fill={isOfferLiked(currentOffer.id) ? '#EF4444' : 'transparent'}
+                        />
+                      </Animated.View>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={toggleComments} style={ms.actionBtn} activeOpacity={0.7}>
+                      <MessageCircle size={25} color="#FFFFFF" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleShare} style={ms.actionBtn} activeOpacity={0.7}>
+                      <Share2 size={24} color={isOfferShared(currentOffer.id) ? Colors.dark.neonGreen : '#FFFFFF'} />
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity onPress={handleSave} style={ms.actionBtn} activeOpacity={0.7}>
+                    <Bookmark
+                      size={25}
+                      color={isSaved ? Colors.dark.primary : '#FFFFFF'}
+                      fill={isSaved ? Colors.dark.primary : 'transparent'}
+                    />
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={handleSave} style={ms.actionBtn} activeOpacity={0.7}>
-                  <Bookmark
-                    size={25}
-                    color={isSaved ? Colors.dark.primary : Colors.dark.text}
-                    fill={isSaved ? Colors.dark.primary : 'transparent'}
-                  />
-                </TouchableOpacity>
-              </View>
 
-              <View style={ms.detailsSection}>
-                <Text style={ms.likeCount}>{likeCount.toLocaleString('pt-BR')} curtidas • {shareCount.toLocaleString('pt-BR')} compartilhamentos</Text>
-                <Text style={ms.offerTitle}>
-                  <Text style={ms.offerTitleBold}>{currentOffer.sponsorName}</Text>
-                  {'  '}{currentOffer.title}
-                </Text>
-                <Text style={ms.offerDesc}>{currentOffer.description}</Text>
+                <View style={ms.detailsSection}>
+                  <Text style={ms.likeCount}>{likeCount.toLocaleString('pt-BR')} curtidas • {shareCount.toLocaleString('pt-BR')} compartilhamentos</Text>
+                  <Text style={ms.offerTitle}>{currentOffer.title}</Text>
+                  <Text style={ms.offerDesc}>{currentOffer.description}</Text>
 
-                <TouchableOpacity onPress={toggleComments} activeOpacity={0.7}>
-                  <Text style={ms.viewComments}>
-                    Ver todos os {commentCount.toLocaleString('pt-BR')} comentarios
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity onPress={toggleComments} activeOpacity={0.7}>
+                    <Text style={ms.viewComments}>
+                      Ver todos os {commentCount.toLocaleString('pt-BR')} comentarios
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           ) : (
@@ -394,77 +471,37 @@ const ms = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.dark.background,
   },
-  handleBar: {
-    alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.dark.textMuted,
-    opacity: 0.4,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.cardBorder,
-  },
-  topBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  sponsorMini: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.dark.surfaceLight,
-    borderWidth: 1,
-    borderColor: Colors.dark.cardBorder,
-  },
-  sponsorName: {
-    fontSize: 14,
-    fontWeight: '700' as const,
-    color: Colors.dark.text,
-  },
-  offerLocation: {
-    fontSize: 11,
-    color: Colors.dark.textMuted,
-  },
-  closeBtn: {
-    padding: 6,
-  },
   contentWrap: {
     flex: 1,
+    overflow: 'hidden',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: Colors.dark.background,
   },
   feedContainer: {
     flex: 1,
+    backgroundColor: '#050505',
   },
-  imageWrap: {
-    position: 'relative' as const,
-    width: SCREEN_W,
-    height: MODAL_MEDIA_HEIGHT,
-    backgroundColor: Colors.dark.surfaceLight,
+  overlayTopControls: {
+    position: 'absolute',
+    top: 14,
+    right: 16,
+    zIndex: 3,
   },
-  offerImage: {
-    width: '100%',
-    height: '100%',
+  overlayCloseBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   carouselDots: {
-    position: 'absolute',
-    bottom: 10,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
-    justifyContent: 'center',
     gap: 6,
+    marginTop: 6,
   },
   dot: {
     width: 7,
@@ -476,26 +513,80 @@ const ms = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     width: 18,
   },
-  discountTag: {
-    position: 'absolute',
-    top: 14,
-    left: 14,
-    backgroundColor: Colors.dark.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+  reelPage: {
+    width: SCREEN_W,
+    backgroundColor: '#050505',
   },
-  discountText: {
+  reelImage: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#050505',
+  },
+  reelFade: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  hintWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    top: 16,
+    alignItems: 'center',
+  },
+  hintChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+  },
+  hintText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '700' as const,
+  },
+  overlayContent: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 18,
+  },
+  overlaySponsorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    alignSelf: 'flex-start',
+    maxWidth: '92%',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  overlaySponsorAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  overlaySponsorInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  overlaySponsorName: {
     color: '#FFF',
-    fontSize: 14,
-    fontWeight: '900' as const,
+    fontSize: 16,
+    fontWeight: '800' as const,
+  },
+  overlaySponsorAddress: {
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 12,
+    lineHeight: 17,
   },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   actionsLeft: {
     flexDirection: 'row',
@@ -506,35 +597,32 @@ const ms = StyleSheet.create({
     padding: 4,
   },
   detailsSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingBottom: 8,
   },
   likeCount: {
     fontSize: 14,
     fontWeight: '700' as const,
-    color: Colors.dark.text,
+    color: '#FFFFFF',
     marginBottom: 6,
   },
   offerTitle: {
-    fontSize: 14,
-    color: Colors.dark.textSecondary,
-    lineHeight: 20,
+    fontSize: 26,
+    color: '#FFFFFF',
+    lineHeight: 31,
+    fontWeight: '900' as const,
     marginBottom: 4,
   },
-  offerTitleBold: {
-    fontWeight: '700' as const,
-    color: Colors.dark.text,
-  },
   offerDesc: {
-    fontSize: 13,
-    color: Colors.dark.textMuted,
-    lineHeight: 18,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.78)',
+    lineHeight: 20,
     marginBottom: 8,
   },
   viewComments: {
     fontSize: 13,
-    color: Colors.dark.textMuted,
+    color: 'rgba(255,255,255,0.78)',
     marginTop: 4,
+    fontWeight: '700' as const,
   },
   commentInputWrap: {
     flexDirection: 'row',

@@ -92,6 +92,10 @@ const COUPON_CACHE_KEYS = {
   LOTTERY_RESULTS: 'lottery_results',
 } as const;
 
+function isBatchGeneratedCoupon(coupon: Coupon): boolean {
+  return typeof coupon.drawId === 'string' && coupon.drawId.startsWith('batch_');
+}
+
 export const [CouponProvider, useCoupon] = createContextHook(() => {
   const queryClient = useQueryClient();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -212,6 +216,28 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
     if (federalResultsQuery.data) setFederalLotteryResults(federalResultsQuery.data);
   }, [federalResultsQuery.data]);
 
+  useEffect(() => {
+    if (couponsQuery.data === undefined || lotteryNumbersQuery.data === undefined) return;
+
+    const invalidCouponIds = coupons
+      .filter((coupon) => isBatchGeneratedCoupon(coupon))
+      .map((coupon) => coupon.id);
+
+    if (invalidCouponIds.length === 0) return;
+
+    const invalidCouponIdSet = new Set(invalidCouponIds);
+    const sanitizedCoupons = coupons.filter((coupon) => !invalidCouponIdSet.has(coupon.id));
+    const sanitizedLotteryNumbers = lotteryNumbers.filter((entry) => !invalidCouponIdSet.has(entry.couponId));
+
+    setCoupons(sanitizedCoupons);
+    setLotteryNumbers(sanitizedLotteryNumbers);
+    void AsyncStorage.setItem(STORAGE_KEYS.COUPONS, JSON.stringify(sanitizedCoupons));
+    void AsyncStorage.setItem(STORAGE_KEYS.LOTTERY_NUMBERS, JSON.stringify(sanitizedLotteryNumbers));
+    void writeDomainCache('coupon', COUPON_CACHE_KEYS.COUPONS, sanitizedCoupons);
+    void writeDomainCache('coupon', COUPON_CACHE_KEYS.LOTTERY_NUMBERS, sanitizedLotteryNumbers);
+    console.log('[CouponProvider] Removed unscanned batch-generated tickets from wallet:', invalidCouponIds.length);
+  }, [coupons, lotteryNumbers, couponsQuery.data, lotteryNumbersQuery.data]);
+
   const addCouponMutation = useMutation({
     mutationFn: async (coupon: Coupon) => {
       const updated = [...coupons, coupon];
@@ -295,6 +321,11 @@ export const [CouponProvider, useCoupon] = createContextHook(() => {
   }, []);
 
   const addCouponRaw = useCallback((coupon: Coupon) => {
+    if (isBatchGeneratedCoupon(coupon)) {
+      console.log('[CouponProvider] Ignoring batch-generated coupon before scan:', coupon.code);
+      return;
+    }
+
     addCouponMutation.mutate(coupon);
     const lotteryCode = extractLotteryCode(coupon.code);
     const entry: LotteryNumber = {

@@ -27,6 +27,9 @@ export interface UserProfile {
   selfieUrl?: string;
   documentUrl?: string;
   savedFields?: Record<string, boolean>;
+  isActive?: boolean;
+  adminReviewStatus?: 'pending' | 'approved' | 'rejected';
+  adminReviewedAt?: string;
 }
 
 export interface Coupon {
@@ -216,5 +219,6 @@ export interface ManagedCity {
   id: string;
   city: string;
   state: string;
+  imageUrl?: string;
   createdAt: string;
 }

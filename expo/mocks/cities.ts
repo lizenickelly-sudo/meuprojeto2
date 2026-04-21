@@ -29,3 +29,12 @@ export const CITIES_BY_STATE: Record<string, string[]> = {
 };
 
 export const STATES = Object.keys(CITIES_BY_STATE).sort();
+
+export type CityOption = {
+  city: string;
+  state: string;
+};
+
+export const ALL_CITY_OPTIONS: CityOption[] = STATES.flatMap((state) =>
+  (CITIES_BY_STATE[state] ?? []).map((city) => ({ city, state })),
+).sort((a, b) => a.city.localeCompare(b.city) || a.state.localeCompare(b.state));

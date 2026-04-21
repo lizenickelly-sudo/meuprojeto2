@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { hashPassword, verifyPassword } from '@/lib/crypto';
 import { supabase } from '@/lib/supabase';
+import { fetchUser as dbFetchUser } from '@/services/database';
 
 interface AuthUser {
   email: string;
@@ -37,6 +38,20 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [isReady, setIsReady] = useState<boolean>(false);
   const [resetEpoch, setResetEpoch] = useState<number>(0);
 
+  const clearStoredAuth = useCallback(async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.log('[AuthProvider] Supabase signOut while clearing auth fallback:', error);
+    }
+    await AsyncStorage.removeItem(AUTH_KEYS.AUTH_STATE);
+  }, []);
+
+  const isUserAllowed = useCallback(async (email: string): Promise<boolean> => {
+    const profile = await dbFetchUser(email);
+    return profile?.isActive !== false;
+  }, []);
+
   const authQuery = useQuery({
     queryKey: ['auth_state'],
     queryFn: async () => {
@@ -56,11 +71,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             // When Supabase is configured, require a real session instead of stale local auth state.
             if (!sessionUser && HAS_REMOTE_AUTH) {
               console.log('[AuthProvider] Missing Supabase session for logged-in state, clearing local auth:', normalizedEmail);
-              await AsyncStorage.removeItem(AUTH_KEYS.AUTH_STATE);
+              await clearStoredAuth();
               return null;
             }
 
             if (!sessionUser) {
+              if (!(await isUserAllowed(normalizedEmail))) {
+                console.log('[AuthProvider] Inactive account blocked during auth restore:', normalizedEmail);
+                await clearStoredAuth();
+                return null;
+              }
               return parsed;
             }
 
@@ -72,6 +92,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 (sessionUser.email && sessionUser.email.trim().toLowerCase() === normalizedEmail)
               )
             ) {
+              if (!(await isUserAllowed(normalizedEmail))) {
+                console.log('[AuthProvider] Inactive account blocked with active session:', normalizedEmail);
+                await clearStoredAuth();
+                return null;
+              }
               return parsed;
             }
 
@@ -98,12 +123,23 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             // Force logout only when session exists and row is confirmed absent.
             if (!error && !exists) {
               console.log('[AuthProvider] User removed from Supabase, clearing auth state:', normalizedEmail);
-              await supabase.auth.signOut();
-              await AsyncStorage.removeItem(AUTH_KEYS.AUTH_STATE);
+              await clearStoredAuth();
+              return null;
+            }
+
+            if (!(await isUserAllowed(normalizedEmail))) {
+              console.log('[AuthProvider] Inactive account blocked after remote validation:', normalizedEmail);
+              await clearStoredAuth();
               return null;
             }
           } catch (error) {
             console.log('[AuthProvider] Remote auth validation fallback to local state:', error);
+          }
+
+          if (!(await isUserAllowed(parsed.userEmail))) {
+            console.log('[AuthProvider] Inactive account blocked after local fallback:', parsed.userEmail);
+            await clearStoredAuth();
+            return null;
           }
         }
 
@@ -140,17 +176,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     try {
       const now = new Date().toISOString();
+      const { data: existingRows } = await supabase
+        .from('users')
+        .select('profile,created_at')
+        .eq('email', normalizedEmail)
+        .limit(1);
+
+      const existingRow = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
+      const existingProfile = existingRow?.profile && typeof existingRow.profile === 'object'
+        ? existingRow.profile as Record<string, unknown>
+        : {};
+      const createdAt = existingRow?.created_at || (typeof existingProfile.createdAt === 'string' ? existingProfile.createdAt : now);
+
       await supabase
         .from('users')
         .upsert({
           email: normalizedEmail,
-          auth_user_id: authUserId || null,
+          auth_user_id: authUserId || (typeof existingProfile.authUserId === 'string' ? existingProfile.authUserId : null),
           profile: {
+            ...existingProfile,
             email: normalizedEmail,
-            authUserId: authUserId || '',
+            authUserId: authUserId || (typeof existingProfile.authUserId === 'string' ? existingProfile.authUserId : ''),
+            createdAt,
+            adminReviewStatus: typeof existingProfile.adminReviewStatus === 'string' ? existingProfile.adminReviewStatus : 'pending',
           },
           updated_at: now,
-          created_at: now,
+          created_at: createdAt,
         }, {
           onConflict: 'email',
         });
@@ -336,6 +387,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       if (remoteAuthSucceeded) {
         await ensureRemoteUserRow(normalizedEmail, remoteUserId);
+      }
+
+      const profile = await dbFetchUser(normalizedEmail);
+      if (profile?.isActive === false) {
+        await clearStoredAuth();
+        throw new Error('Sua conta esta desativada. Procure o administrador.');
       }
 
       const authState: AuthState = {

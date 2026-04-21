@@ -7,6 +7,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import Colors from '@/constants/colors';
+import { formatCPF } from '@/lib/formatters';
 import { useUser } from '@/providers/UserProvider';
 import { useAdmin } from '@/providers/AdminProvider';
 
@@ -31,14 +32,6 @@ function validateCPF(cpf: string): boolean {
   remainder = (sum * 10) % 11;
   if (remainder === 10 || remainder === 11) remainder = 0;
   return remainder === parseInt(clean.substring(10, 11));
-}
-
-function formatCPF(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 11);
-  return digits
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -369,7 +362,9 @@ export default function IdentityVerifyScreen() {
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await saveProfile({
         ...profile,
-        identityVerified: true,
+        identityVerified: false,
+        adminReviewStatus: 'pending',
+        adminReviewedAt: undefined,
         avatarUrl: selfieUrl,
         selfieUrl,
         documentUrl,
@@ -411,8 +406,8 @@ export default function IdentityVerifyScreen() {
           <Animated.View style={[v.successIcon, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
             <CheckCircle size={72} color={Colors.dark.neonGreen} />
           </Animated.View>
-          <Animated.Text style={[v.successTtl, { opacity: opacityAnim }]}>Verificado!</Animated.Text>
-          <Animated.Text style={[v.successDesc, { opacity: opacityAnim }]}>Sua identidade foi verificada com sucesso. Agora voce pode realizar saques via PIX.</Animated.Text>
+          <Animated.Text style={[v.successTtl, { opacity: opacityAnim }]}>Enviado para análise!</Animated.Text>
+          <Animated.Text style={[v.successDesc, { opacity: opacityAnim }]}>Seus documentos foram enviados. O perfil e a carteira só mostrarão Verificado quando o admin ativar sua conta.</Animated.Text>
           <Animated.View style={{ opacity: opacityAnim }}>
             <TouchableOpacity style={v.doneBtn} onPress={() => router.back()} activeOpacity={0.8}>
               <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={v.doneBtnG}>

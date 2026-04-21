@@ -59,6 +59,15 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import Colors from '@/constants/colors';
+import { formatCPF, formatPhone, formatPixKeyValue } from '@/lib/formatters';
+import {
+  getAdminImageBucketName,
+  getAdminImageStorageSetupInstructions,
+  getAdminImageStorageSetupSql,
+  isAdminImageBucketMissingError,
+  isAdminImageStoragePolicyError,
+  uploadAdminImage,
+} from '@/lib/adminMedia';
 import {
   formatVideoDuration,
   getSponsorVideoBucketName,
@@ -68,15 +77,12 @@ import {
   isSponsorVideoStoragePolicyError,
   uploadSponsorPromotionalVideo,
 } from '@/lib/sponsorMedia';
-import { CITIES_BY_STATE, STATES } from '@/mocks/cities';
+import { ALL_CITY_OPTIONS, STATES } from '@/mocks/cities';
 import { useAdmin } from '@/providers/AdminProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
-import { useCoupon } from '@/providers/CouponProvider';
 import { useUser } from '@/providers/UserProvider';
-import { mockWinners, mockGrandPrize } from '@/mocks/winners';
-import { hasTableMissingError, hasConfigError } from '@/services/database';
-import { Database, Sprout, AlertTriangle } from 'lucide-react-native';
-import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, SponsorVideo, GrandPrize, PromotionalQR, ManagedCity } from '@/types';
+import { upsertUserServerOnly } from '@/services/database';
+import type { Sponsor, CouponBatch, AdminNotification, SponsorImage, SponsorVideo, GrandPrize, PromotionalQR, ManagedCity, UserProfile } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const MAX_PROMOTIONAL_VIDEOS = 5;
@@ -84,6 +90,87 @@ const MAX_PROMOTIONAL_VIDEO_BYTES = 50 * 1024 * 1024;
 
 type MainTab = 'overview' | 'states' | 'cities';
 type CitySubTab = 'prize' | 'sponsors' | 'coupons' | 'notifications' | 'promoqr';
+type UserReviewStatus = 'pending' | 'approved' | 'rejected';
+type UserReviewRow = { profile: UserProfile; balance: number; points: number };
+
+function getUserDisplayName(profile: UserProfile): string {
+  return profile.name.trim() || profile.email.trim() || 'Usuario sem nome';
+}
+
+function getUserReviewStatus(profile: UserProfile): UserReviewStatus {
+  if (profile.adminReviewStatus === 'approved' || profile.adminReviewStatus === 'rejected' || profile.adminReviewStatus === 'pending') {
+    return profile.adminReviewStatus;
+  }
+
+  if (profile.adminReviewedAt) {
+    return profile.isActive === false ? 'rejected' : 'approved';
+  }
+
+  return 'pending';
+}
+
+function getUserReviewStatusMeta(status: UserReviewStatus): { label: string; backgroundColor: string; textColor: string } {
+  if (status === 'approved') {
+    return {
+      label: 'Ativo',
+      backgroundColor: 'rgba(16,185,129,0.12)',
+      textColor: Colors.dark.success,
+    };
+  }
+
+  if (status === 'rejected') {
+    return {
+      label: 'Desativado',
+      backgroundColor: 'rgba(239,68,68,0.1)',
+      textColor: Colors.dark.danger,
+    };
+  }
+
+  return {
+    label: 'Pendente',
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    textColor: Colors.dark.warning,
+  };
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return 'Nao informado';
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Nao informado';
+
+  return parsed.toLocaleString('pt-BR');
+}
+
+function normalizeSearchText(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function formatUserLocation(profile: UserProfile): string {
+  const parts = [profile.city.trim(), profile.state.trim()].filter(Boolean);
+  return parts.length ? parts.join(' - ') : 'Cidade nao informada';
+}
+
+function ReviewStatusBadge({ profile }: { profile: UserProfile }) {
+  const meta = getUserReviewStatusMeta(getUserReviewStatus(profile));
+
+  return (
+    <View style={[ur.statusBadge, { backgroundColor: meta.backgroundColor }]}>
+      <Text style={[ur.statusBadgeText, { color: meta.textColor }]}>{meta.label}</Text>
+    </View>
+  );
+}
+
+function ReviewDetailItem({ label, value, multiline = false }: { label: string; value?: string | number | null; multiline?: boolean }) {
+  const resolved = value === undefined || value === null || `${value}`.trim() === '' ? 'Nao informado' : `${value}`;
+
+  return (
+    <View style={ur.detailItem}>
+      <Text style={ur.detailLabel}>{label}</Text>
+      <Text style={[ur.detailValue, multiline && ur.detailValueMultiline]}>{resolved}</Text>
+    </View>
+  );
+}
 
 function TabButton({ label, active, onPress, icon: Icon }: { label: string; active: boolean; onPress: () => void; icon: React.ElementType }) {
   return (
@@ -731,7 +818,7 @@ function SponsorFormModal({
             </View>
             <View style={fm.field}>
               <Text style={fm.label}>Telefone</Text>
-              <TextInput style={fm.input} value={form.phone} onChangeText={(v) => updateField('phone', v)} placeholder="(11) 99999-0000" placeholderTextColor={Colors.dark.textMuted} keyboardType="phone-pad" />
+              <TextInput style={fm.input} value={formatPhone(form.phone)} onChangeText={(v) => updateField('phone', formatPhone(v))} placeholder="(11) 99999-0000" placeholderTextColor={Colors.dark.textMuted} keyboardType="phone-pad" />
             </View>
             <View style={fm.field}>
               <Text style={fm.label}>Localizacao</Text>
@@ -1433,11 +1520,13 @@ const pqm = StyleSheet.create({
 
 const bm = StyleSheet.create({
   pickerList: { backgroundColor: Colors.dark.surfaceLight, borderRadius: 12, marginTop: 8, overflow: 'hidden' },
+  pickerSearch: { margin: 12, marginBottom: 4, backgroundColor: Colors.dark.card, borderRadius: 10, borderWidth: 1, borderColor: Colors.dark.cardBorder, color: Colors.dark.text, fontSize: 14, paddingHorizontal: 12, paddingVertical: 10 },
   pickerItem: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
   pickerItemActive: { backgroundColor: Colors.dark.neonGreenFaint },
   pickerItemTxt: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const },
   pickerItemTxtActive: { color: Colors.dark.neonGreen },
   pickerItemSub: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 2 },
+  emptyText: { color: Colors.dark.textMuted, fontSize: 13, textAlign: 'center' as const, paddingHorizontal: 14, paddingVertical: 18 },
 });
 
 function NotificationModal({
@@ -1555,15 +1644,12 @@ export default function AdminPanel() {
     updateNotification,
     deleteNotification,
     grandPrizeConfig,
-    saveGrandPrize,
     cityPrizes,
     saveCityPrize,
     getCityPrize,
     cityImages,
     saveCityImage,
-    getCityImage,
-    seedDatabase,
-    checkTables,
+    fetchUsers,
     promoQRCodes,
     addPromoQR,
     updatePromoQR,
@@ -1572,24 +1658,16 @@ export default function AdminPanel() {
     managedCities,
     addManagedCity,
     verifyIdentity,
-    getPendingIdentityVerifications,
+    refreshManagedCities,
   } = useAdmin();
   const {
     sponsors,
     addSponsor,
     updateSponsor,
     deleteSponsor,
-    sponsorsByCity,
-    sponsorsByState,
+    refreshSponsors,
   } = useSponsor();
-  const {
-    coupons,
-    validCoupons,
-    usedCoupons,
-    couponsBySponsor,
-    addCouponRaw,
-  } = useCoupon();
-  const { creditUserBalance } = useUser();
+  const { creditUserBalance, profile: currentUserProfile, refreshProfile } = useUser();
 
   const [mainTab, setMainTab] = useState<MainTab>('overview');
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
@@ -1612,21 +1690,34 @@ export default function AdminPanel() {
     sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100',
   });
 
-  const [seeding, setSeeding] = useState<boolean>(false);
-
-  const [couponFilterTab, setCouponFilterTab] = useState<'all' | 'active' | 'used' | 'sponsor'>('all');
-  const [selectedCouponSponsor, setSelectedCouponSponsor] = useState<string>('');
   const [showAddCityModal, setShowAddCityModal] = useState<boolean>(false);
+  const [syncingServer, setSyncingServer] = useState<boolean>(false);
   const [newCityName, setNewCityName] = useState<string>('');
   const [newCityState, setNewCityState] = useState<string>('SP');
   const [showStatePicker, setShowStatePicker] = useState<boolean>(false);
   const [showCityPicker, setShowCityPicker] = useState<boolean>(false);
+  const [newCitySearch, setNewCitySearch] = useState<string>('');
   const [newCityPhotoUri, setNewCityPhotoUri] = useState<string | null>(null);
   const [cityHeaderImageError, setCityHeaderImageError] = useState<boolean>(false);
+  const [showUserReviewModal, setShowUserReviewModal] = useState<boolean>(false);
+  const [loadingUserReviewRows, setLoadingUserReviewRows] = useState<boolean>(false);
+  const [savingUserReviewEmail, setSavingUserReviewEmail] = useState<string>('');
+  const [userReviewRows, setUserReviewRows] = useState<UserReviewRow[]>([]);
+  const [selectedUserReviewEmail, setSelectedUserReviewEmail] = useState<string | null>(null);
 
   const suggestedCities = useMemo(() => {
-    return CITIES_BY_STATE[newCityState] ?? [];
-  }, [newCityState]);
+    const normalizedSearch = normalizeSearchText(newCitySearch);
+    if (!normalizedSearch) return ALL_CITY_OPTIONS;
+
+    return ALL_CITY_OPTIONS.filter(({ city, state }) => {
+      const normalizedCity = normalizeSearchText(city);
+      const normalizedState = normalizeSearchText(state);
+
+      return normalizedCity.startsWith(normalizedSearch)
+        || normalizedState.startsWith(normalizedSearch)
+        || normalizedCity.split(' ').some((part) => part.startsWith(normalizedSearch));
+    });
+  }, [newCitySearch]);
 
   const getCityImageUri = useCallback((city: string | null) => {
     if (!city) return null;
@@ -1679,17 +1770,71 @@ export default function AdminPanel() {
   }, [sponsors, selectedState]);
 
   const totalOffers = useMemo(() => sponsors.reduce((sum, s) => sum + s.offers.length, 0), [sponsors]);
+  const totalServerCoupons = useMemo(() => couponBatches.reduce((sum, batch) => sum + batch.quantity, 0), [couponBatches]);
 
   const cityPrizeData = useMemo(() => {
     if (!selectedCity) return null;
     return getCityPrize(selectedCity);
   }, [selectedCity, getCityPrize]);
 
+  const selectedCityState = useMemo(() => {
+    if (!selectedCity) return null;
+    return cities.find((city) => city.city === selectedCity)?.state ?? null;
+  }, [cities, selectedCity]);
+
+  const selectedUserReviewRow = useMemo(() => {
+    if (!selectedUserReviewEmail) return null;
+    return userReviewRows.find((row) => row.profile.email === selectedUserReviewEmail) ?? null;
+  }, [selectedUserReviewEmail, userReviewRows]);
+
+  const userReviewSummary = useMemo(() => {
+    return userReviewRows.reduce((summary, row) => {
+      const status = getUserReviewStatus(row.profile);
+      summary.total += 1;
+      summary[status] += 1;
+      return summary;
+    }, {
+      total: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+    });
+  }, [userReviewRows]);
+
   const [prizeMsg, setPrizeMsg] = useState<string>('');
   const [prizeVal, setPrizeVal] = useState<string>('');
   const [prizeDrawDate, setPrizeDrawDate] = useState<string>('');
   const [prizeBgUrl, setPrizeBgUrl] = useState<string>('');
   const [prizeLotteryRef, setPrizeLotteryRef] = useState<string>('');
+  const [prizeBgUploadMeta, setPrizeBgUploadMeta] = useState<{ fileName?: string; mimeType?: string } | null>(null);
+  const [savingCityPrize, setSavingCityPrize] = useState<boolean>(false);
+
+  const copyAdminImageStorageSql = useCallback(async () => {
+    await Clipboard.setStringAsync(getAdminImageStorageSetupSql());
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    Alert.alert(
+      'SQL copiado',
+      `Cole o SQL no SQL Editor do Supabase para criar o bucket "${getAdminImageBucketName()}" e liberar os uploads.`,
+    );
+  }, []);
+
+  const showAdminImageStorageSetupAlert = useCallback((message?: string) => {
+    Alert.alert(
+      'Storage de imagens nao configurado',
+      `${message || getAdminImageStorageSetupInstructions()}\n\nUse "Copiar SQL do Storage" e execute o script uma vez no SQL Editor do Supabase.`,
+      [
+        { text: 'Agora nao', style: 'cancel' },
+        {
+          text: 'Copiar SQL',
+          onPress: () => {
+            void copyAdminImageStorageSql();
+          },
+        },
+      ],
+    );
+  }, [copyAdminImageStorageSql]);
 
   React.useEffect(() => {
     if (selectedCity) {
@@ -1702,6 +1847,7 @@ export default function AdminPanel() {
       setPrizeVal(prize?.value?.toString() ?? '10000');
       setPrizeDrawDate(prize?.drawDate ?? '2026-05-15');
       setPrizeBgUrl(prize?.backgroundImageUrl ?? '');
+      setPrizeBgUploadMeta(null);
       setPrizeLotteryRef(prize?.lotteryReference ?? 'Loteria Federal');
     }
   }, [selectedCity, getCityPrize, grandPrizeConfig]);
@@ -1720,7 +1866,7 @@ export default function AdminPanel() {
         address: editingSponsor.address,
         city: editingSponsor.city,
         state: editingSponsor.state,
-        phone: editingSponsor.phone,
+        phone: formatPhone(editingSponsor.phone),
         description: editingSponsor.description,
         minPurchaseValue: editingSponsor.minPurchaseValue.toString(),
         couponValue: (editingSponsor.couponValue ?? 0).toString(),
@@ -1772,7 +1918,7 @@ export default function AdminPanel() {
       state: data.state.trim(),
       latitude: parseFloat(data.latitude) || -23.5505,
       longitude: parseFloat(data.longitude) || -46.6333,
-      phone: data.phone.trim(),
+      phone: formatPhone(data.phone).trim(),
       description: data.description.trim(),
       minPurchaseValue: parseFloat(data.minPurchaseValue) || 50,
       verified: data.verified,
@@ -1811,7 +1957,7 @@ export default function AdminPanel() {
     setSponsorDraftId('');
   }, [editingSponsor, sponsorDraftId, updateSponsor, addSponsor, addManagedCity]);
 
-  const handleSaveManagedCity = useCallback(() => {
+  const handleSaveManagedCity = useCallback(async () => {
     const city = newCityName.trim();
     const state = newCityState.trim().toUpperCase();
     if (!city) {
@@ -1833,19 +1979,40 @@ export default function AdminPanel() {
       state,
       createdAt: new Date().toISOString(),
     };
-    addManagedCity(created);
-    // Salvar foto se foi escolhida
-    if (newCityPhotoUri) {
-      saveCityImage(city, newCityPhotoUri);
+
+    try {
+      if (newCityPhotoUri) {
+        const uploadedImage = await uploadAdminImage({
+          folder: 'city-images',
+          itemId: `${state}-${city}`,
+          fileUri: newCityPhotoUri,
+        });
+        await saveCityImage(city, uploadedImage.publicUrl, state);
+      } else {
+        addManagedCity(created);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel salvar a foto da cidade';
+
+      if (isAdminImageBucketMissingError(error) || isAdminImageStoragePolicyError(error)) {
+        showAdminImageStorageSetupAlert(errorMessage);
+      } else {
+        Alert.alert('Falha ao salvar cidade', errorMessage);
+      }
+      return;
     }
+
     setShowAddCityModal(false);
+    setShowCityPicker(false);
+    setShowStatePicker(false);
+    setNewCitySearch('');
     setNewCityName('');
     setNewCityState('SP');
     setNewCityPhotoUri(null);
     setSelectedCity(city);
     setCitySubTab('prize');
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [newCityName, newCityState, cities, addManagedCity, newCityPhotoUri, saveCityImage]);
+  }, [addManagedCity, cities, newCityName, newCityPhotoUri, newCityState, saveCityImage, showAdminImageStorageSetupAlert]);
 
   const handleDeleteSponsor = useCallback((sponsor: Sponsor) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1891,11 +2058,29 @@ export default function AdminPanel() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets?.[0]?.uri) {
-      saveCityImage(city, result.assets[0].uri);
-      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      console.log('[Admin] City photo saved for:', city);
+      try {
+        const uploadedImage = await uploadAdminImage({
+          folder: 'city-images',
+          itemId: `${selectedCityState ?? 'city'}-${city}`,
+          fileUri: result.assets[0].uri,
+          fileName: result.assets[0].fileName || undefined,
+          mimeType: result.assets[0].mimeType || undefined,
+        });
+
+        await saveCityImage(city, uploadedImage.publicUrl, selectedCityState ?? undefined);
+        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        console.log('[Admin] City photo saved for:', city, uploadedImage.publicUrl);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel salvar a foto da cidade';
+
+        if (isAdminImageBucketMissingError(error) || isAdminImageStoragePolicyError(error)) {
+          showAdminImageStorageSetupAlert(errorMessage);
+        } else {
+          Alert.alert('Falha no upload', errorMessage);
+        }
+      }
     }
-  }, [saveCityImage]);
+  }, [saveCityImage, selectedCityState, showAdminImageStorageSetupAlert]);
 
   const handlePickNewCityPhoto = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1919,28 +2104,74 @@ export default function AdminPanel() {
     });
     if (!result.canceled && result.assets?.[0]?.uri) {
       setPrizeBgUrl(result.assets[0].uri);
+      setPrizeBgUploadMeta({
+        fileName: result.assets[0].fileName ?? undefined,
+        mimeType: result.assets[0].mimeType ?? undefined,
+      });
     }
   }, []);
 
-  const handleSaveCityPrize = useCallback(() => {
-    if (!selectedCity) return;
-    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const prize: GrandPrize = {
-      id: cityPrizeData?.id ?? `gp_${selectedCity}_${Date.now()}`,
-      title: `GRANDE PREMIO - ${selectedCity}`,
-      value: parseFloat(prizeVal) || 10000,
-      imageUrl: cityPrizeData?.imageUrl ?? mockGrandPrize.imageUrl,
-      backgroundImageUrl: prizeBgUrl.trim() || undefined,
-      drawDate: prizeDrawDate || '2026-05-15',
-      lotteryReference: prizeLotteryRef || 'Loteria Federal',
-      description: prizeMsg || `Grande premio da cidade de ${selectedCity}`,
-      isActive: true,
-      city: selectedCity,
-      state: cities.find((c) => c.city === selectedCity)?.state,
-    };
-    saveCityPrize(selectedCity, prize);
-    Alert.alert('Sucesso', `Premio de ${selectedCity} salvo!`);
-  }, [selectedCity, prizeVal, prizeDrawDate, prizeBgUrl, prizeLotteryRef, prizeMsg, cityPrizeData, cities, saveCityPrize]);
+  const handleSaveCityPrize = useCallback(async () => {
+    if (!selectedCity || savingCityPrize) return;
+
+    setSavingCityPrize(true);
+
+    try {
+      let resolvedBackgroundImageUrl = prizeBgUrl.trim();
+
+      if (
+        resolvedBackgroundImageUrl &&
+        !resolvedBackgroundImageUrl.startsWith('http://') &&
+        !resolvedBackgroundImageUrl.startsWith('https://')
+      ) {
+        const uploadedImage = await uploadAdminImage({
+          folder: 'prizes',
+          itemId: selectedCity,
+          fileUri: resolvedBackgroundImageUrl,
+          fileName: prizeBgUploadMeta?.fileName,
+          mimeType: prizeBgUploadMeta?.mimeType,
+        });
+
+        resolvedBackgroundImageUrl = uploadedImage.publicUrl;
+      }
+
+      const prize: GrandPrize = {
+        id: cityPrizeData?.id ?? `gp_${selectedCity}_${Date.now()}`,
+        title: `GRANDE PREMIO - ${selectedCity}`,
+        value: parseFloat(prizeVal) || 10000,
+        imageUrl: cityPrizeData?.imageUrl ?? grandPrizeConfig?.imageUrl ?? '',
+        backgroundImageUrl: resolvedBackgroundImageUrl || undefined,
+        drawDate: prizeDrawDate || '2026-05-15',
+        lotteryReference: prizeLotteryRef || 'Loteria Federal',
+        description: prizeMsg || `Grande premio da cidade de ${selectedCity}`,
+        isActive: true,
+        city: selectedCity,
+        state: cities.find((c) => c.city === selectedCity)?.state,
+      };
+
+      await saveCityPrize(selectedCity, prize);
+      setPrizeBgUrl(resolvedBackgroundImageUrl);
+      setPrizeBgUploadMeta(null);
+
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
+      Alert.alert('Sucesso', `Premio de ${selectedCity} salvo!`);
+    } catch (error) {
+      console.log('[Admin] Failed to save city prize:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel salvar o premio.';
+
+      if (isAdminImageBucketMissingError(error) || isAdminImageStoragePolicyError(error)) {
+        showAdminImageStorageSetupAlert(errorMessage);
+        return;
+      }
+
+      Alert.alert('Erro', errorMessage);
+    } finally {
+      setSavingCityPrize(false);
+    }
+  }, [selectedCity, savingCityPrize, prizeBgUrl, prizeBgUploadMeta?.fileName, prizeBgUploadMeta?.mimeType, cityPrizeData, prizeVal, grandPrizeConfig?.imageUrl, prizeDrawDate, prizeLotteryRef, prizeMsg, cities, saveCityPrize, showAdminImageStorageSetupAlert]);
 
   const handleSendNotification = useCallback((notif: AdminNotification) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1961,7 +2192,7 @@ export default function AdminPanel() {
   const handleVerifyIdentity = useCallback((notif: AdminNotification) => {
     const metadata = notif.metadata;
     const userEmail = metadata?.userEmail ?? '';
-    const cpf = metadata?.cpf ?? '';
+    const cpf = formatCPF(metadata?.cpf ?? '');
 
     if (!userEmail || !cpf) {
       Alert.alert('Dados incompletos', 'Esta solicitacao nao possui os dados necessarios para verificacao.');
@@ -2056,6 +2287,123 @@ export default function AdminPanel() {
     );
   }, [creditUserBalance, updateNotification]);
 
+  const loadUserReviewRows = useCallback(async () => {
+    setLoadingUserReviewRows(true);
+
+    try {
+      const rows = await fetchUsers();
+      const statusWeight: Record<UserReviewStatus, number> = {
+        pending: 0,
+        rejected: 1,
+        approved: 2,
+      };
+
+      const sorted = [...rows].sort((left, right) => {
+        const statusDiff = statusWeight[getUserReviewStatus(left.profile)] - statusWeight[getUserReviewStatus(right.profile)];
+        if (statusDiff !== 0) return statusDiff;
+
+        const leftTime = new Date(left.profile.adminReviewedAt || left.profile.createdAt || 0).getTime();
+        const rightTime = new Date(right.profile.adminReviewedAt || right.profile.createdAt || 0).getTime();
+        return rightTime - leftTime;
+      });
+
+      setUserReviewRows(sorted);
+    } catch (error) {
+      console.log('[Admin] Failed to load users for review:', error);
+      Alert.alert('Erro', 'Nao foi possivel carregar os usuarios para revisao.');
+    } finally {
+      setLoadingUserReviewRows(false);
+    }
+  }, [fetchUsers]);
+
+  const handleOpenUserReviewModal = useCallback(() => {
+    setSelectedUserReviewEmail(null);
+    setShowUserReviewModal(true);
+    void loadUserReviewRows();
+  }, [loadUserReviewRows]);
+
+  const handleCloseUserReviewModal = useCallback(() => {
+    setShowUserReviewModal(false);
+    setSelectedUserReviewEmail(null);
+    setSavingUserReviewEmail('');
+  }, []);
+
+  const handleRefreshUserReviewRows = useCallback(() => {
+    void loadUserReviewRows();
+  }, [loadUserReviewRows]);
+
+  const handleUpdateUserActivation = useCallback(async (row: UserReviewRow, nextActive: boolean) => {
+    const normalizedEmail = row.profile.email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      Alert.alert('Erro', 'Este usuario nao possui e-mail valido para atualizar.');
+      return;
+    }
+
+    const nextProfile: UserProfile = {
+      ...row.profile,
+      email: normalizedEmail,
+      isActive: nextActive,
+      identityVerified: nextActive ? true : row.profile.identityVerified,
+      adminReviewStatus: nextActive ? 'approved' : 'rejected',
+      adminReviewedAt: new Date().toISOString(),
+    };
+
+    setSavingUserReviewEmail(normalizedEmail);
+
+    try {
+      const saved = await upsertUserServerOnly(nextProfile, row.balance, row.points);
+      if (!saved) {
+        throw new Error('Failed to persist user activation in the server');
+      }
+
+      setUserReviewRows((currentRows) => currentRows.map((item) => (
+        item.profile.email.trim().toLowerCase() === normalizedEmail
+          ? { ...item, profile: nextProfile }
+          : item
+      )));
+
+      if (normalizedEmail === currentUserProfile.email.trim().toLowerCase()) {
+        await refreshProfile();
+      }
+
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(nextActive ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+      }
+
+      Alert.alert(
+        'Sucesso',
+        nextActive ? 'Usuario ativado e revisado com sucesso.' : 'Usuario desativado com sucesso.',
+      );
+    } catch (error) {
+      console.log('[Admin] Failed to update user activation:', error);
+      Alert.alert('Erro', 'Nao foi possivel atualizar este usuario.');
+    } finally {
+      setSavingUserReviewEmail('');
+    }
+  }, [currentUserProfile.email, refreshProfile]);
+
+  const handleSyncCurrentDataToServer = useCallback(async () => {
+    setSyncingServer(true);
+
+    try {
+      await Promise.all([
+        refreshSponsors(),
+        refreshManagedCities(),
+      ]);
+
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
+      Alert.alert('Sucesso', 'Painel atualizado com as cidades e os patrocinadores salvos no servidor.');
+    } catch (error) {
+      console.log('[Admin] Failed refreshing cities and sponsors from server:', error);
+      Alert.alert('Erro', 'Nao foi possivel atualizar as cidades e os patrocinadores salvos no servidor.');
+    } finally {
+      setSyncingServer(false);
+    }
+  }, [refreshManagedCities, refreshSponsors]);
+
   if (!isAdmin) {
     return (
       <View style={a.denied}>
@@ -2075,7 +2423,7 @@ export default function AdminPanel() {
       </View>
       <View style={a.statsRow}>
         <StatCard icon={Gift} label="Ofertas" value={totalOffers.toString()} color={Colors.dark.gold} />
-        <StatCard icon={Ticket} label="Cupons" value={coupons.length.toString()} color={Colors.dark.warning} />
+        <StatCard icon={Ticket} label="Cupons" value={totalServerCoupons.toString()} color={Colors.dark.warning} />
         <StatCard icon={Trophy} label="Premios" value={Object.keys(cityPrizes).length.toString()} color={Colors.dark.danger} />
       </View>
 
@@ -2086,16 +2434,16 @@ export default function AdminPanel() {
         </View>
         <View style={a.summaryGrid}>
           <View style={a.summaryItem}>
-            <Text style={a.summaryVal}>{validCoupons.length}</Text>
-            <Text style={a.summaryLbl}>Cupons Ativos</Text>
-          </View>
-          <View style={a.summaryItem}>
-            <Text style={a.summaryVal}>{usedCoupons.length}</Text>
-            <Text style={a.summaryLbl}>Cupons Usados</Text>
+            <Text style={a.summaryVal}>{totalServerCoupons}</Text>
+            <Text style={a.summaryLbl}>Cupons no Servidor</Text>
           </View>
           <View style={a.summaryItem}>
             <Text style={a.summaryVal}>{couponBatches.length}</Text>
             <Text style={a.summaryLbl}>Lotes Gerados</Text>
+          </View>
+          <View style={a.summaryItem}>
+            <Text style={a.summaryVal}>{promoQRCodes.length}</Text>
+            <Text style={a.summaryLbl}>QR Promocionais</Text>
           </View>
           <View style={a.summaryItem}>
             <Text style={a.summaryVal}>{notifications.length}</Text>
@@ -2129,13 +2477,13 @@ export default function AdminPanel() {
           </View>
           <ChevronRight size={18} color={Colors.dark.textMuted} />
         </TouchableOpacity>
-        <TouchableOpacity style={a.actionRow} onPress={() => setShowBatchModal(true)} activeOpacity={0.7}>
-          <View style={[a.actIcon, { backgroundColor: Colors.dark.neonGreenFaint }]}>
-            <Package size={18} color={Colors.dark.neonGreen} />
+        <TouchableOpacity style={a.actionRow} onPress={handleOpenUserReviewModal} activeOpacity={0.7}>
+          <View style={[a.actIcon, { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
+            <Users size={18} color="#2563EB" />
           </View>
           <View style={a.actInfo}>
-            <Text style={a.actTtl}>Gerar Lote de Cupons</Text>
-            <Text style={a.actSub}>Criar cupons para patrocinador</Text>
+            <Text style={a.actTtl}>Verificar Dados de Usuarios</Text>
+            <Text style={a.actSub}>Revisar cadastro e ativar ou desativar contas</Text>
           </View>
           <ChevronRight size={18} color={Colors.dark.textMuted} />
         </TouchableOpacity>
@@ -2149,126 +2497,17 @@ export default function AdminPanel() {
           </View>
           <ChevronRight size={18} color={Colors.dark.textMuted} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={a.actionRow}
-          onPress={() => {
-            Alert.alert('Sincronizar Dados', 'Enviar todos os dados locais para o banco?', [
-              { text: 'Cancelar', style: 'cancel' },
-              {
-                text: 'Sincronizar',
-                onPress: async () => {
-                  try {
-                    const result = await seedDatabase();
-                    const sponsorsOk = !result.sponsors.error;
-                    const allOk = sponsorsOk && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
-                    const anyTableMissing = hasTableMissingError(result.sponsors.error) || hasTableMissingError(result.winners.error) || hasTableMissingError(result.leaderboard.error) || hasTableMissingError(result.grandPrize.error);
-                    const anyConfigError = hasConfigError(result.sponsors.error) || hasConfigError(result.winners.error);
-
-                    if (anyConfigError) {
-                      Alert.alert('Banco Nao Configurado', 'O banco de dados remoto nao esta configurado.');
-                    } else if (anyTableMissing) {
-                      Alert.alert('Tabelas nao encontradas', 'As tabelas do banco nao existem.');
-                    } else {
-                      Alert.alert(
-                        allOk ? 'Sucesso' : 'Sincronizacao com Erros',
-                        `Patrocinadores: ${result.sponsors.error ? result.sponsors.error : `${result.sponsors.count} OK`}\nGanhadores: ${result.winners.ok ? 'OK' : (result.winners.error ?? 'Erro')}\nLeaderboard: ${result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Erro')}\nPremio: ${result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Erro')}`,
-                      );
-                    }
-                  } catch (err) {
-                    Alert.alert('Erro', 'Falha ao sincronizar dados');
-                  }
-                },
-              },
-            ]);
-          }}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={a.actionRow} onPress={handleSyncCurrentDataToServer} activeOpacity={0.7} disabled={syncingServer}>
           <View style={[a.actIcon, { backgroundColor: 'rgba(0,184,101,0.1)' }]}>
-            <Database size={18} color={Colors.dark.neonGreen} />
+            <Save size={18} color={Colors.dark.neonGreen} />
           </View>
           <View style={a.actInfo}>
-            <Text style={a.actTtl}>Sincronizar Dados</Text>
-            <Text style={a.actSub}>Enviar dados para o banco de dados</Text>
+            <Text style={a.actTtl}>{syncingServer ? 'Sincronizando...' : 'Sincronizar com Servidor'}</Text>
+            <Text style={a.actSub}>Atualizar cidades e lojas salvas no servidor</Text>
           </View>
           <ChevronRight size={18} color={Colors.dark.textMuted} />
         </TouchableOpacity>
       </View>
-
-      <TouchableOpacity
-        style={a.seedBtn}
-        activeOpacity={0.8}
-        disabled={seeding}
-        testID="seed-database-btn"
-        onPress={() => {
-            Alert.alert(
-              'Seed Database',
-              'Isso vai popular o banco com todos os dados de exemplo (patrocinadores, ofertas, ganhadores, leaderboard e premio).\n\nDeseja continuar?',
-              [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                  text: 'Seed',
-                  onPress: async () => {
-                    setSeeding(true);
-                    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                    try {
-                      console.log('[ADMIN] Starting database seed...');
-                      const result = await seedDatabase();
-                      console.log('[ADMIN] Seed result:', result);
-
-                      const anyTableMissing = hasTableMissingError(result.sponsors.error) || hasTableMissingError(result.winners.error) || hasTableMissingError(result.leaderboard.error) || hasTableMissingError(result.grandPrize.error);
-                      const anyConfigError = hasConfigError(result.sponsors.error) || hasConfigError(result.winners.error);
-
-                      if (anyConfigError) {
-                        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                        Alert.alert(
-                          'Banco Nao Configurado',
-                          'O banco de dados remoto nao esta configurado.',
-                        );
-                      } else if (anyTableMissing) {
-                        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                        Alert.alert('Tabelas nao encontradas!', 'As tabelas do banco de dados nao existem.');
-                      } else {
-                        const sponsorsOk = !result.sponsors.error;
-                        const sponsorStatus = result.sponsors.error ? result.sponsors.error : `${result.sponsors.count} OK`;
-                        const winnersStatus = result.winners.ok ? 'OK' : (result.winners.error ?? 'Falhou');
-                        const leaderboardStatus = result.leaderboard.ok ? 'OK' : (result.leaderboard.error ?? 'Falhou');
-                        const prizeStatus = result.grandPrize.ok ? 'OK' : (result.grandPrize.error ?? 'Falhou');
-                        const allOk = sponsorsOk && result.winners.ok && result.leaderboard.ok && result.grandPrize.ok;
-
-                        if (Platform.OS !== 'web') {
-                          Haptics.notificationAsync(allOk ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
-                        }
-                        Alert.alert(
-                          allOk ? 'Seed Concluido!' : 'Seed com Erros',
-                          `Patrocinadores: ${sponsorStatus}\nGanhadores: ${winnersStatus}\nLeaderboard: ${leaderboardStatus}\nPremio: ${prizeStatus}`,
-                        );
-                      }
-                    } catch (err: any) {
-                      console.log('[ADMIN] Seed error:', err);
-                      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                      Alert.alert('Erro', `Falha ao executar seed: ${err?.message ?? 'Erro desconhecido'}`);
-                    } finally {
-                      setSeeding(false);
-                    }
-                  },
-                },
-              ],
-            );
-          }}
-        >
-          <LinearGradient
-            colors={seeding ? ['#555', '#444'] : ['#10B981', '#059669']}
-            style={a.seedBtnGrad}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <Sprout size={20} color="#fff" />
-            <Text style={a.seedBtnTxt}>{seeding ? 'Populando banco...' : 'SEED DATABASE'}</Text>
-            <Text style={a.seedBtnSub}>Popular banco com dados de exemplo</Text>
-          </LinearGradient>
-      </TouchableOpacity>
-
-
     </>
   );
 
@@ -2514,7 +2753,7 @@ export default function AdminPanel() {
       </View>
       {prizeBgUrl ? (
         <View style={a.prizePreview}>
-          <Image source={{ uri: prizeBgUrl }} style={a.prizePreviewImg} contentFit="cover" />
+          <Image source={{ uri: prizeBgUrl }} style={a.prizePreviewImg} contentFit="cover" contentPosition="center" />
           <View style={a.prizePreviewOverlay}>
             <Text style={a.prizePreviewTxt}>Preview do Fundo</Text>
             <TouchableOpacity style={a.changeBgBtn} onPress={handlePickPrizeBg} activeOpacity={0.7}>
@@ -2546,10 +2785,10 @@ export default function AdminPanel() {
         <TextInput style={[a.inp, { minHeight: 80, textAlignVertical: 'top' as const }]} value={prizeMsg} onChangeText={setPrizeMsg} placeholder="Descricao do grande premio..." placeholderTextColor={Colors.dark.textMuted} multiline />
       </View>
 
-      <TouchableOpacity style={a.saveBtn} onPress={handleSaveCityPrize} activeOpacity={0.8}>
-        <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={a.saveBtnG}>
-          <Save size={16} color="#000" />
-          <Text style={a.saveBtnT}>SALVAR PREMIO DE {selectedCity?.toUpperCase()}</Text>
+      <TouchableOpacity style={[a.saveBtn, savingCityPrize && a.saveBtnDisabled]} onPress={() => { void handleSaveCityPrize(); }} activeOpacity={0.8} disabled={savingCityPrize}>
+        <LinearGradient colors={savingCityPrize ? [Colors.dark.surfaceLight, Colors.dark.inputBg] : [Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={a.saveBtnG}>
+          {savingCityPrize ? <ActivityIndicator size="small" color="#000" /> : <Save size={16} color="#000" />}
+          <Text style={a.saveBtnT}>{savingCityPrize ? 'SALVANDO PREMIO...' : `SALVAR PREMIO DE ${selectedCity?.toUpperCase()}`}</Text>
         </LinearGradient>
       </TouchableOpacity>
     </View>
@@ -2580,27 +2819,8 @@ export default function AdminPanel() {
 
   const renderCityCoupons = () => {
     const citySponsorIds = citySponsors.map((s) => s.id);
-    const cityCoupons = coupons.filter((c) => citySponsorIds.includes(c.sponsorId));
-    const cityValid = cityCoupons.filter((c) => c.status === 'valid');
-    const cityUsed = cityCoupons.filter((c) => c.status === 'used');
-
-    const couponTabs: { key: typeof couponFilterTab; label: string }[] = [
-      { key: 'all', label: `Todos (${cityCoupons.length})` },
-      { key: 'active', label: `Ativos (${cityValid.length})` },
-      { key: 'used', label: `Usados (${cityUsed.length})` },
-      { key: 'sponsor', label: 'Por Loja' },
-    ];
-
-    const filteredCoupons = (() => {
-      switch (couponFilterTab) {
-        case 'active': return cityValid;
-        case 'used': return cityUsed;
-        case 'sponsor':
-          if (selectedCouponSponsor) return couponsBySponsor[selectedCouponSponsor] ?? [];
-          return cityCoupons;
-        default: return cityCoupons;
-      }
-    })();
+    const cityCouponBatches = couponBatches.filter((batch) => citySponsorIds.includes(batch.sponsorId));
+    const cityCouponCount = cityCouponBatches.reduce((sum, batch) => sum + batch.quantity, 0);
 
     return (
       <>
@@ -2609,58 +2829,29 @@ export default function AdminPanel() {
             <Ticket size={18} color={Colors.dark.neonGreen} />
             <Text style={a.secTtl}>Cupons - {selectedCity}</Text>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={a.filterScroll} contentContainerStyle={a.filterScrollContent}>
-            {couponTabs.map((tab) => (
-              <TouchableOpacity key={tab.key} style={[a.filterChip, couponFilterTab === tab.key && a.filterChipActive]} onPress={() => setCouponFilterTab(tab.key)}>
-                <Text style={[a.filterChipTxt, couponFilterTab === tab.key && a.filterChipTxtActive]}>{tab.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          {couponFilterTab === 'sponsor' && (
-            <View style={a.sponsorFilterSection}>
-              <Text style={a.fLbl}>Selecione a Loja</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
-                {citySponsors.map((sp) => (
-                  <TouchableOpacity key={sp.id} style={[a.filterChip, selectedCouponSponsor === sp.id && a.filterChipActive]} onPress={() => setSelectedCouponSponsor(sp.id)}>
-                    <Text style={[a.filterChipTxt, selectedCouponSponsor === sp.id && a.filterChipTxtActive]}>{sp.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+          <View style={a.summaryGrid}>
+            <View style={a.summaryItem}>
+              <Text style={a.summaryVal}>{cityCouponCount}</Text>
+              <Text style={a.summaryLbl}>Cupons no Servidor</Text>
             </View>
-          )}
-          {filteredCoupons.length === 0 ? (
-            <View style={a.emptyState}>
-              <Ticket size={32} color={Colors.dark.textMuted} />
-              <Text style={a.emptyTxt}>Nenhum cupom nesta cidade</Text>
+            <View style={a.summaryItem}>
+              <Text style={a.summaryVal}>{cityCouponBatches.length}</Text>
+              <Text style={a.summaryLbl}>Lotes da Cidade</Text>
             </View>
-          ) : (
-            filteredCoupons.map((c) => (
-              <View key={c.id} style={a.couponRow}>
-                <View style={[a.couponStatus, c.status === 'valid' ? a.couponStatusActive : c.status === 'used' ? a.couponStatusUsed : a.couponStatusExpired]} />
-                <View style={a.couponInfo}>
-                  <Text style={a.couponCode}>{c.code}</Text>
-                  <Text style={a.couponMeta}>{c.sponsorName} - R$ {c.value.toFixed(2)}</Text>
-                  <Text style={a.couponDate}>{new Date(c.scannedAt).toLocaleDateString('pt-BR')}</Text>
-                </View>
-                <View style={[a.couponBadge, c.status === 'valid' ? a.couponBadgeActive : c.status === 'used' ? a.couponBadgeUsed : a.couponBadgeExpired]}>
-                  <Text style={a.couponBadgeTxt}>{c.status === 'valid' ? 'Ativo' : c.status === 'used' ? 'Usado' : 'Expirado'}</Text>
-                </View>
-              </View>
-            ))
-          )}
+          </View>
         </View>
         <View style={a.section}>
           <View style={a.secHdr}>
             <Package size={18} color={Colors.dark.neonGreen} />
             <Text style={a.secTtl}>Lotes de Cupons</Text>
           </View>
-          {couponBatches.filter((b) => citySponsorIds.includes(b.sponsorId)).length === 0 ? (
+          {cityCouponBatches.length === 0 ? (
             <View style={a.emptyState}>
               <Package size={32} color={Colors.dark.textMuted} />
               <Text style={a.emptyTxt}>Nenhum lote gerado para esta cidade</Text>
             </View>
           ) : (
-            couponBatches.filter((b) => citySponsorIds.includes(b.sponsorId)).map((batch) => (
+            cityCouponBatches.map((batch) => (
               <View key={batch.id} style={a.batchRow}>
                 <View style={a.batchIcon}>
                   <Hash size={16} color={Colors.dark.neonGreen} />
@@ -3104,22 +3295,7 @@ export default function AdminPanel() {
         }}
         onGenerate={(batch) => {
           addCouponBatch(batch);
-          console.log('[Admin] Generating individual coupons from batch:', batch.id, batch.codes.length, 'codes');
-          batch.codes.forEach((code) => {
-            const coupon: import('@/types').Coupon = {
-              id: `coupon_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-              code,
-              value: batch.value,
-              sponsorId: batch.sponsorId,
-              sponsorName: batch.sponsorName,
-              status: 'valid',
-              scannedAt: batch.createdAt,
-              expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-              drawId: batch.id,
-            };
-            addCouponRaw(coupon);
-          });
-          console.log('[Admin] Individual coupons created from batch');
+          console.log('[Admin] Coupon batch saved; codes will only appear in wallet after real scan:', batch.id, batch.codes.length, 'codes');
         }}
       />
 
@@ -3177,10 +3353,240 @@ export default function AdminPanel() {
         initialData={editingNotif}
       />
 
-      <Modal visible={showAddCityModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAddCityModal(false)}>
+      <Modal visible={showUserReviewModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={handleCloseUserReviewModal}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={fm.container}>
           <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
-            <TouchableOpacity onPress={() => setShowAddCityModal(false)} style={fm.closeBtn}>
+            <TouchableOpacity onPress={handleCloseUserReviewModal} style={fm.closeBtn}>
+              <X size={22} color={Colors.dark.text} />
+            </TouchableOpacity>
+            <Text style={fm.headerTitle}>{selectedUserReviewRow ? 'Revisar Usuario' : 'Usuarios para Revisao'}</Text>
+            <TouchableOpacity
+              onPress={handleRefreshUserReviewRows}
+              style={[fm.saveHeaderBtn, ur.headerActionBtn, loadingUserReviewRows && ur.headerActionBtnDisabled]}
+              disabled={loadingUserReviewRows}
+            >
+              <Text style={fm.saveHeaderTxt}>{loadingUserReviewRows ? 'Atualizando' : 'Atualizar'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {loadingUserReviewRows ? (
+            <View style={ur.loadingWrap}>
+              <ActivityIndicator size="large" color={Colors.dark.primary} />
+              <Text style={ur.loadingText}>Carregando usuarios...</Text>
+            </View>
+          ) : (
+            <ScrollView contentContainerStyle={ur.scrollContent} showsVerticalScrollIndicator={false}>
+              {!selectedUserReviewRow ? (
+                <>
+                  <View style={ur.summaryPanel}>
+                    <View style={ur.summaryCard}>
+                      <Text style={ur.summaryNumber}>{userReviewSummary.total}</Text>
+                      <Text style={ur.summaryLabel}>Usuarios</Text>
+                    </View>
+                    <View style={ur.summaryCard}>
+                      <Text style={[ur.summaryNumber, { color: Colors.dark.warning }]}>{userReviewSummary.pending}</Text>
+                      <Text style={ur.summaryLabel}>Pendentes</Text>
+                    </View>
+                    <View style={ur.summaryCard}>
+                      <Text style={[ur.summaryNumber, { color: Colors.dark.success }]}>{userReviewSummary.approved}</Text>
+                      <Text style={ur.summaryLabel}>Ativos</Text>
+                    </View>
+                    <View style={ur.summaryCard}>
+                      <Text style={[ur.summaryNumber, { color: Colors.dark.danger }]}>{userReviewSummary.rejected}</Text>
+                      <Text style={ur.summaryLabel}>Desativados</Text>
+                    </View>
+                  </View>
+
+                  <View style={ur.listSection}>
+                    <Text style={ur.sectionTitle}>Selecione um usuario</Text>
+                    <Text style={ur.sectionSubtitle}>Abra a ficha para conferir dados enviados, documentos e status da conta.</Text>
+
+                    {userReviewRows.length === 0 ? (
+                      <View style={a.emptyState}>
+                        <Users size={32} color={Colors.dark.textMuted} />
+                        <Text style={a.emptyTxt}>Nenhum usuario encontrado para revisao</Text>
+                      </View>
+                    ) : (
+                      userReviewRows.map((row) => (
+                        <TouchableOpacity
+                          key={row.profile.email || row.profile.id}
+                          style={ur.userCard}
+                          activeOpacity={0.8}
+                          onPress={() => setSelectedUserReviewEmail(row.profile.email)}
+                        >
+                          {row.profile.avatarUrl ? (
+                            <Image source={{ uri: row.profile.avatarUrl }} style={ur.userAvatar} contentFit="cover" />
+                          ) : (
+                            <View style={ur.userAvatarPlaceholder}>
+                              <Users size={18} color={Colors.dark.primary} />
+                            </View>
+                          )}
+
+                          <View style={ur.userCardInfo}>
+                            <Text style={ur.userName} numberOfLines={1}>{getUserDisplayName(row.profile)}</Text>
+                            <Text style={ur.userMeta} numberOfLines={1}>{row.profile.email || 'Sem e-mail'}</Text>
+                            <Text style={ur.userMeta} numberOfLines={1}>{formatUserLocation(row.profile)}</Text>
+                          </View>
+
+                          <View style={ur.userCardSide}>
+                            <ReviewStatusBadge profile={row.profile} />
+                            <ChevronRight size={16} color={Colors.dark.textMuted} />
+                          </View>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity style={ur.inlineBackBtn} onPress={() => setSelectedUserReviewEmail(null)} activeOpacity={0.8}>
+                    <ChevronLeft size={18} color={Colors.dark.primary} />
+                    <Text style={ur.inlineBackText}>Voltar para lista</Text>
+                  </TouchableOpacity>
+
+                  <View style={ur.heroCard}>
+                    {selectedUserReviewRow.profile.avatarUrl ? (
+                      <Image source={{ uri: selectedUserReviewRow.profile.avatarUrl }} style={ur.heroAvatar} contentFit="cover" />
+                    ) : (
+                      <View style={ur.heroAvatarPlaceholder}>
+                        <Users size={24} color={Colors.dark.primary} />
+                      </View>
+                    )}
+
+                    <View style={ur.heroInfo}>
+                      <ReviewStatusBadge profile={selectedUserReviewRow.profile} />
+                      <Text style={ur.heroTitle}>{getUserDisplayName(selectedUserReviewRow.profile)}</Text>
+                      <Text style={ur.heroSubtitle}>{selectedUserReviewRow.profile.email || 'Sem e-mail'}</Text>
+                      <Text style={ur.heroSubtitle}>{formatUserLocation(selectedUserReviewRow.profile)}</Text>
+                    </View>
+                  </View>
+
+                  <View style={ur.metricRow}>
+                    <View style={ur.metricCard}>
+                      <Text style={ur.metricLabel}>Saldo</Text>
+                      <Text style={ur.metricValue}>R$ {selectedUserReviewRow.balance.toFixed(2)}</Text>
+                    </View>
+                    <View style={ur.metricCard}>
+                      <Text style={ur.metricLabel}>Pontos</Text>
+                      <Text style={ur.metricValue}>{selectedUserReviewRow.points}</Text>
+                    </View>
+                  </View>
+
+                  <View style={ur.actionButtonRow}>
+                    <TouchableOpacity
+                      style={[
+                        ur.primaryActionBtn,
+                        savingUserReviewEmail === selectedUserReviewRow.profile.email.trim().toLowerCase() && ur.actionBtnDisabled,
+                      ]}
+                      activeOpacity={0.85}
+                      disabled={savingUserReviewEmail === selectedUserReviewRow.profile.email.trim().toLowerCase()}
+                      onPress={() => handleUpdateUserActivation(selectedUserReviewRow, true)}
+                    >
+                      {savingUserReviewEmail === selectedUserReviewRow.profile.email.trim().toLowerCase() ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : null}
+                      <Text style={ur.primaryActionText}>Confirmar e Ativar</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        ur.secondaryActionBtn,
+                        savingUserReviewEmail === selectedUserReviewRow.profile.email.trim().toLowerCase() && ur.actionBtnDisabled,
+                      ]}
+                      activeOpacity={0.85}
+                      disabled={savingUserReviewEmail === selectedUserReviewRow.profile.email.trim().toLowerCase()}
+                      onPress={() => handleUpdateUserActivation(selectedUserReviewRow, false)}
+                    >
+                      <Text style={ur.secondaryActionText}>Desativar Usuario</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={ur.detailSection}>
+                    <Text style={ur.sectionTitle}>Dados Pessoais</Text>
+                    <ReviewDetailItem label="Nome" value={selectedUserReviewRow.profile.name} />
+                    <ReviewDetailItem label="CPF" value={formatCPF(selectedUserReviewRow.profile.cpf)} />
+                    <ReviewDetailItem label="Telefone" value={formatPhone(selectedUserReviewRow.profile.phone)} />
+                    <ReviewDetailItem label="E-mail" value={selectedUserReviewRow.profile.email} />
+                    <ReviewDetailItem label="Criado em" value={formatDateTime(selectedUserReviewRow.profile.createdAt)} />
+                  </View>
+
+                  <View style={ur.detailSection}>
+                    <Text style={ur.sectionTitle}>Endereco e Indicacao</Text>
+                    <ReviewDetailItem label="Cidade" value={selectedUserReviewRow.profile.city} />
+                    <ReviewDetailItem label="Estado" value={selectedUserReviewRow.profile.state} />
+                    <ReviewDetailItem label="Codigo de indicacao" value={selectedUserReviewRow.profile.referralCode} />
+                    <ReviewDetailItem label="Indicado por" value={selectedUserReviewRow.profile.referredBy} />
+                  </View>
+
+                  <View style={ur.detailSection}>
+                    <Text style={ur.sectionTitle}>PIX e Validacao</Text>
+                    <ReviewDetailItem label="Tipo da chave principal" value={selectedUserReviewRow.profile.pixKeyType} />
+                    <ReviewDetailItem label="Chave principal" value={formatPixKeyValue(selectedUserReviewRow.profile.pixKeyType, selectedUserReviewRow.profile.pixKey)} multiline />
+                    <ReviewDetailItem label="Chave CPF" value={formatCPF(selectedUserReviewRow.profile.pixCpf || '')} multiline />
+                    <ReviewDetailItem label="Chave telefone" value={formatPhone(selectedUserReviewRow.profile.pixPhone || '')} multiline />
+                    <ReviewDetailItem label="Chave e-mail" value={selectedUserReviewRow.profile.pixEmail} multiline />
+                    <ReviewDetailItem label="Chave aleatoria" value={selectedUserReviewRow.profile.pixRandom} multiline />
+                    <ReviewDetailItem label="Identidade verificada" value={selectedUserReviewRow.profile.identityVerified ? 'Sim' : 'Nao'} />
+                    <ReviewDetailItem label="Ultima revisao admin" value={formatDateTime(selectedUserReviewRow.profile.adminReviewedAt)} />
+                  </View>
+
+                  <View style={ur.detailSection}>
+                    <Text style={ur.sectionTitle}>Arquivos Enviados</Text>
+                    <Text style={ur.sectionSubtitle}>Avatar, selfie e documento usados na conferência manual.</Text>
+
+                    {!selectedUserReviewRow.profile.avatarUrl && !selectedUserReviewRow.profile.selfieUrl && !selectedUserReviewRow.profile.documentUrl ? (
+                      <View style={a.emptyState}>
+                        <ImageIcon size={28} color={Colors.dark.textMuted} />
+                        <Text style={a.emptyTxt}>Nenhum arquivo enviado</Text>
+                      </View>
+                    ) : (
+                      <View style={ur.mediaGrid}>
+                        {selectedUserReviewRow.profile.avatarUrl ? (
+                          <View style={ur.mediaCard}>
+                            <Text style={ur.mediaLabel}>Avatar</Text>
+                            <Image source={{ uri: selectedUserReviewRow.profile.avatarUrl }} style={ur.mediaImage} contentFit="cover" />
+                          </View>
+                        ) : null}
+
+                        {selectedUserReviewRow.profile.selfieUrl ? (
+                          <View style={ur.mediaCard}>
+                            <Text style={ur.mediaLabel}>Selfie</Text>
+                            <Image source={{ uri: selectedUserReviewRow.profile.selfieUrl }} style={ur.mediaImage} contentFit="cover" />
+                          </View>
+                        ) : null}
+
+                        {selectedUserReviewRow.profile.documentUrl ? (
+                          <View style={ur.mediaCard}>
+                            <Text style={ur.mediaLabel}>Documento</Text>
+                            <Image source={{ uri: selectedUserReviewRow.profile.documentUrl }} style={ur.mediaImage} contentFit="cover" />
+                          </View>
+                        ) : null}
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+
+              <View style={{ height: 32 }} />
+            </ScrollView>
+          )}
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={showAddCityModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => {
+        setShowAddCityModal(false);
+        setShowCityPicker(false);
+        setShowStatePicker(false);
+        setNewCitySearch('');
+      }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={fm.container}>
+          <View style={[fm.header, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 8 }]}>
+            <TouchableOpacity onPress={() => {
+              setShowAddCityModal(false);
+              setShowCityPicker(false);
+              setShowStatePicker(false);
+              setNewCitySearch('');
+            }} style={fm.closeBtn}>
               <X size={22} color={Colors.dark.text} />
             </TouchableOpacity>
             <Text style={fm.headerTitle}>Adicionar Cidade</Text>
@@ -3211,6 +3617,7 @@ export default function AdminPanel() {
                           onPress={() => {
                             setNewCityState(uf);
                             setNewCityName('');
+                            setNewCitySearch('');
                             setShowStatePicker(false);
                             setShowCityPicker(true);
                           }}
@@ -3223,33 +3630,54 @@ export default function AdminPanel() {
                 ) : null}
               </View>
               <View style={fm.field}>
-                <Text style={fm.label}>Cidade do Estado *</Text>
+                <Text style={fm.label}>Cidade *</Text>
                 <TouchableOpacity
                   style={[fm.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
-                  onPress={() => setShowCityPicker((v) => !v)}
+                  onPress={() => {
+                    setShowStatePicker(false);
+                    setShowCityPicker((v) => {
+                      const next = !v;
+                      if (!next) setNewCitySearch('');
+                      return next;
+                    });
+                  }}
                   activeOpacity={0.8}
                 >
                   <Text style={{ color: newCityName ? Colors.dark.text : Colors.dark.textMuted, fontSize: 14 }}>
-                    {newCityName || 'Escolha uma cidade do estado'}
+                    {newCityName ? `${newCityName} - ${newCityState}` : 'Escolha uma cidade'}
                   </Text>
                   <ChevronDown size={16} color={Colors.dark.textMuted} />
                 </TouchableOpacity>
                 {showCityPicker ? (
                   <View style={bm.pickerList}>
+                    <TextInput
+                      style={bm.pickerSearch}
+                      value={newCitySearch}
+                      onChangeText={setNewCitySearch}
+                      placeholder="Digite as primeiras letras"
+                      placeholderTextColor={Colors.dark.textMuted}
+                      autoCapitalize="words"
+                      autoCorrect={false}
+                      autoFocus
+                    />
                     <ScrollView style={{ maxHeight: 260 }} nestedScrollEnabled>
-                      {suggestedCities.map((cityName) => (
+                      {suggestedCities.map(({ city, state }) => (
                         <TouchableOpacity
-                          key={cityName}
-                          style={[bm.pickerItem, newCityName === cityName && bm.pickerItemActive]}
+                          key={`${state}|${city}`}
+                          style={[bm.pickerItem, newCityName === city && newCityState === state && bm.pickerItemActive]}
                           onPress={() => {
-                            setNewCityName(cityName);
+                            setNewCityName(city);
+                            setNewCityState(state);
                             setShowCityPicker(false);
+                            setShowStatePicker(false);
+                            setNewCitySearch('');
                           }}
                         >
-                          <Text style={[bm.pickerItemTxt, newCityName === cityName && bm.pickerItemTxtActive]}>{cityName}</Text>
-                          <Text style={bm.pickerItemSub}>{newCityState}</Text>
+                          <Text style={[bm.pickerItemTxt, newCityName === city && newCityState === state && bm.pickerItemTxtActive]}>{city}</Text>
+                          <Text style={bm.pickerItemSub}>{state}</Text>
                         </TouchableOpacity>
                       ))}
+                      {suggestedCities.length === 0 ? <Text style={bm.emptyText}>Nenhuma cidade encontrada</Text> : null}
                     </ScrollView>
                   </View>
                 ) : null}
@@ -3333,6 +3761,7 @@ const a = StyleSheet.create({
   fieldHint: { color: Colors.dark.textMuted, fontSize: 10, marginTop: 4 },
   inp: { backgroundColor: Colors.dark.inputBg, borderRadius: 12, padding: 12, color: Colors.dark.text, fontSize: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder },
   saveBtn: { borderRadius: 12, overflow: 'hidden', marginTop: 4, shadowColor: "#00FF87", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4 },
+  saveBtnDisabled: { opacity: 0.85 },
   saveBtnG: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, paddingVertical: 12, gap: 8 },
   saveBtnT: { color: '#000', fontSize: 13, fontWeight: '700' as const, letterSpacing: 0.5 },
   prizePreview: { borderRadius: 14, overflow: 'hidden', marginBottom: 12, height: 160, position: 'relative' as const },
@@ -3439,6 +3868,57 @@ const a = StyleSheet.create({
   notifSentTxt: { color: '#000', fontSize: 9, fontWeight: '700' as const },
   notifActions: { flexDirection: 'row' as const, gap: 6 },
   notifActBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+});
+
+const ur = StyleSheet.create({
+  headerActionBtn: { minWidth: 88, alignItems: 'center' as const },
+  headerActionBtnDisabled: { opacity: 0.7 },
+  loadingWrap: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 12, paddingHorizontal: 24 },
+  loadingText: { color: Colors.dark.textMuted, fontSize: 13 },
+  scrollContent: { padding: 16, paddingBottom: 0 },
+  summaryPanel: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 10, marginBottom: 16 },
+  summaryCard: { width: '47%' as any, backgroundColor: Colors.dark.card, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  summaryNumber: { color: Colors.dark.text, fontSize: 24, fontWeight: '800' as const },
+  summaryLabel: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 4 },
+  listSection: { backgroundColor: Colors.dark.card, borderRadius: 18, borderWidth: 1, borderColor: Colors.dark.cardBorder, padding: 16 },
+  sectionTitle: { color: Colors.dark.text, fontSize: 16, fontWeight: '700' as const },
+  sectionSubtitle: { color: Colors.dark.textMuted, fontSize: 12, lineHeight: 18, marginTop: 6, marginBottom: 14 },
+  userCard: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 12, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12, backgroundColor: Colors.dark.surfaceLight, marginBottom: 10 },
+  userAvatar: { width: 52, height: 52, borderRadius: 16, backgroundColor: Colors.dark.inputBg },
+  userAvatarPlaceholder: { width: 52, height: 52, borderRadius: 16, backgroundColor: Colors.dark.primaryFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+  userCardInfo: { flex: 1 },
+  userCardSide: { alignItems: 'flex-end' as const, gap: 10 },
+  userName: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
+  userMeta: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 3 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' as const },
+  inlineBackBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginBottom: 12 },
+  inlineBackText: { color: Colors.dark.primary, fontSize: 13, fontWeight: '700' as const },
+  heroCard: { backgroundColor: Colors.dark.card, borderRadius: 18, borderWidth: 1, borderColor: Colors.dark.cardBorder, padding: 16, flexDirection: 'row' as const, gap: 14, alignItems: 'center' as const },
+  heroAvatar: { width: 76, height: 76, borderRadius: 22, backgroundColor: Colors.dark.inputBg },
+  heroAvatarPlaceholder: { width: 76, height: 76, borderRadius: 22, backgroundColor: Colors.dark.primaryFaint, alignItems: 'center' as const, justifyContent: 'center' as const },
+  heroInfo: { flex: 1, gap: 4 },
+  heroTitle: { color: Colors.dark.text, fontSize: 19, fontWeight: '800' as const },
+  heroSubtitle: { color: Colors.dark.textMuted, fontSize: 12 },
+  metricRow: { flexDirection: 'row' as const, gap: 10, marginTop: 12 },
+  metricCard: { flex: 1, backgroundColor: Colors.dark.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder, paddingVertical: 14, paddingHorizontal: 16 },
+  metricLabel: { color: Colors.dark.textMuted, fontSize: 11, marginBottom: 4 },
+  metricValue: { color: Colors.dark.text, fontSize: 18, fontWeight: '800' as const },
+  actionButtonRow: { gap: 10, marginTop: 12, marginBottom: 2 },
+  primaryActionBtn: { minHeight: 50, borderRadius: 14, backgroundColor: Colors.dark.success, alignItems: 'center' as const, justifyContent: 'center' as const, flexDirection: 'row' as const, gap: 8, paddingHorizontal: 16 },
+  primaryActionText: { color: '#fff', fontSize: 14, fontWeight: '800' as const },
+  secondaryActionBtn: { minHeight: 50, borderRadius: 14, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 16 },
+  secondaryActionText: { color: Colors.dark.danger, fontSize: 14, fontWeight: '800' as const },
+  actionBtnDisabled: { opacity: 0.7 },
+  detailSection: { backgroundColor: Colors.dark.card, borderRadius: 18, borderWidth: 1, borderColor: Colors.dark.cardBorder, padding: 16, marginTop: 14 },
+  detailItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
+  detailLabel: { color: Colors.dark.textMuted, fontSize: 11, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.4 },
+  detailValue: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const, marginTop: 4 },
+  detailValueMultiline: { lineHeight: 20 },
+  mediaGrid: { gap: 12 },
+  mediaCard: { backgroundColor: Colors.dark.surfaceLight, borderRadius: 14, padding: 12 },
+  mediaLabel: { color: Colors.dark.text, fontSize: 13, fontWeight: '700' as const, marginBottom: 10 },
+  mediaImage: { width: '100%', height: 220, borderRadius: 12, backgroundColor: Colors.dark.inputBg },
 });
 
 const pq = StyleSheet.create({

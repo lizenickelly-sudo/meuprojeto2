@@ -13,6 +13,7 @@ export default function SponsorReelFeedItem({
   sponsor,
   video,
   active,
+  visible,
   soundEnabled,
   height,
   onOpenSponsor,
@@ -20,6 +21,7 @@ export default function SponsorReelFeedItem({
   sponsor: Sponsor;
   video: SponsorVideo;
   active: boolean;
+  visible: boolean;
   soundEnabled: boolean;
   height: number;
   onOpenSponsor: () => void;
@@ -34,22 +36,24 @@ export default function SponsorReelFeedItem({
   }, (instance) => {
     instance.loop = true;
     instance.staysActiveInBackground = false;
-    instance.muted = !soundEnabled;
+    instance.muted = !soundEnabled || !visible;
   });
 
   const { status, error } = useEvent(player, 'statusChange', { status: player.status, error: undefined });
 
   useEffect(() => {
-    player.muted = !soundEnabled;
+    player.muted = !soundEnabled || !visible;
 
-    if (active) {
+    if (active && visible) {
       player.play();
       return;
     }
 
     player.pause();
-    player.currentTime = 0;
-  }, [active, player, soundEnabled]);
+    if (!active) {
+      player.currentTime = 0;
+    }
+  }, [active, player, soundEnabled, visible]);
 
   return (
     <View style={[s.container, { height }]}> 
@@ -90,10 +94,8 @@ export default function SponsorReelFeedItem({
           </View>
         </View>
 
-        <Text style={s.reelTitle} numberOfLines={2}>{video.title || 'Reel promocional'}</Text>
         <Text style={s.reelSubtitle} numberOfLines={2}>
           {formatVideoDuration(video.durationSeconds)}
-          {video.fileName ? ` • ${video.fileName}` : ''}
           {sponsor.address ? ` • ${sponsor.address}` : ''}
         </Text>
 
@@ -128,25 +130,25 @@ const s = StyleSheet.create({
   headerChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
     alignSelf: 'flex-start',
-    maxWidth: '88%',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 20,
+    maxWidth: '92%',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.16)',
   },
   logo: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.15)',
   },
   headerInfo: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   titleRow: {
     flexDirection: 'row',
@@ -155,7 +157,7 @@ const s = StyleSheet.create({
   },
   sponsorName: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800' as const,
     flexShrink: 1,
   },
@@ -184,13 +186,6 @@ const s = StyleSheet.create({
     color: '#FFF',
     fontSize: 11,
     fontWeight: '700' as const,
-  },
-  reelTitle: {
-    color: '#FFF',
-    fontSize: 27,
-    lineHeight: 32,
-    fontWeight: '900' as const,
-    maxWidth: '88%',
   },
   reelSubtitle: {
     color: 'rgba(255,255,255,0.76)',

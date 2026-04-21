@@ -3,12 +3,15 @@ import { mockWinners, mockGrandPrize } from '@/mocks/winners';
 import { mockLeaderboard } from '@/mocks/leaderboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSponsorVideoStorageSetupSql } from '@/lib/sponsorMedia';
-import type { Sponsor, Winner, GrandPrize, UserProfile } from '@/types';
+import type { CouponBatch, ManagedCity, PromotionalQR, Sponsor, Winner, GrandPrize, UserProfile } from '@/types';
 import type { LeaderboardEntry } from '@/mocks/leaderboard';
 
 const DB_KEYS = {
   USERS: 'cashboxpix_db_users',
 };
+
+const CITY_PRIZES_CAMPAIGN_ID = 'cashboxpix_city_prizes';
+const CITY_PRIZE_EVENT_TYPE = 'city_prize_config';
 
 type PersistedUserRow = {
   profile: UserProfile;
@@ -41,6 +44,53 @@ type RemoteAppStateRow = {
   updated_at?: string | null;
 };
 
+type RemoteSponsorRow = {
+  id: string;
+  name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  verified?: boolean | null;
+  data?: Partial<Sponsor> | null;
+  updated_at?: string | null;
+  video_url?: string | null;
+  thumbnail_url?: string | null;
+};
+
+type RemoteManagedCityRow = {
+  id: string;
+  city?: string | null;
+  state?: string | null;
+  data?: Partial<ManagedCity> | null;
+  created_at?: string | null;
+};
+
+type RemoteCouponBatchRow = {
+  id: string;
+  sponsor_id?: string | null;
+  data?: Partial<CouponBatch> | null;
+  created_at?: string | null;
+};
+
+type RemotePromoQRCodeRow = {
+  id: string;
+  sponsor_id?: string | null;
+  city?: string | null;
+  state?: string | null;
+  data?: Partial<PromotionalQR> | null;
+  created_at?: string | null;
+};
+
+type RemoteCityPrizeEventRow = {
+  id: string;
+  campaign_id: string;
+  city_key: string;
+  city?: string | null;
+  state?: string | null;
+  event_type: string;
+  data?: Partial<GrandPrize> | null;
+  created_at?: string | null;
+};
+
 const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').trim();
 const SUPABASE_ANON_KEY = (
   process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
@@ -60,20 +110,207 @@ function normalizeCpf(value: string): string {
   return value.replace(/\D/g, '');
 }
 
-function mergeSponsorVideoFallbacks(sponsors: Sponsor[]): Sponsor[] {
-  const mockSponsorsById = new Map(mockSponsors.map((sponsor) => [sponsor.id, sponsor]));
+function normalizeCityKey(value: string): string {
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 
-  return sponsors.map((sponsor) => {
-    const mockSponsor = mockSponsorsById.get(sponsor.id);
-    if (!mockSponsor?.promotionalVideos?.length || sponsor.promotionalVideos?.length) {
-      return sponsor;
-    }
+  return normalized || 'city';
+}
 
-    return {
-      ...sponsor,
-      promotionalVideos: mockSponsor.promotionalVideos,
-    };
-  });
+function buildCityPrizeRowId(cityKey: string): string {
+  return `city_prize_${cityKey}`;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function toFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
+  const data = toRecord(row.data);
+  const sponsorId = row.id || String(data.id || '');
+  const sponsorName = row.name ?? String(data.name || '');
+  const city = row.city ?? String(data.city || '');
+  const state = row.state ?? String(data.state || '');
+  const imageUrl = String(data.imageUrl || row.thumbnail_url || data.logoUrl || '');
+  const logoUrl = String(data.logoUrl || row.thumbnail_url || data.imageUrl || '');
+  const promotionalVideos = Array.isArray(data.promotionalVideos)
+    ? data.promotionalVideos
+    : row.video_url
+      ? [{ id: `${sponsorId}_video`, url: row.video_url, createdAt: row.updated_at || new Date().toISOString() }]
+      : [];
+
+  return {
+    id: sponsorId,
+    name: sponsorName,
+    category: String(data.category || ''),
+    imageUrl,
+    logoUrl,
+    address: String(data.address || ''),
+    city,
+    state,
+    latitude: toFiniteNumber(data.latitude, 0),
+    longitude: toFiniteNumber(data.longitude, 0),
+    phone: String(data.phone || ''),
+    whatsapp: data.whatsapp ? String(data.whatsapp) : undefined,
+    description: String(data.description || ''),
+    offers: Array.isArray(data.offers) ? data.offers as Sponsor['offers'] : [],
+    minPurchaseValue: toFiniteNumber(data.minPurchaseValue, 0),
+    verified: Boolean(row.verified ?? data.verified),
+    couponValue: data.couponValue === undefined || data.couponValue === null ? undefined : toFiniteNumber(data.couponValue, 0),
+    stories: Array.isArray(data.stories) ? data.stories as Sponsor['stories'] : [],
+    galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages as Sponsor['galleryImages'] : [],
+    promotionalVideos: promotionalVideos as Sponsor['promotionalVideos'],
+  };
+}
+
+function mapRemoteManagedCityRow(row: RemoteManagedCityRow): ManagedCity {
+  const data = toRecord(row.data);
+  return {
+    id: row.id || String(data.id || ''),
+    city: row.city ?? String(data.city || ''),
+    state: row.state ?? String(data.state || ''),
+    imageUrl: data.imageUrl ? String(data.imageUrl) : undefined,
+    createdAt: String(data.createdAt || row.created_at || new Date().toISOString()),
+  };
+}
+
+function buildRemoteSponsorRow(sponsor: Sponsor): RemoteSponsorRow {
+  const firstVideo = sponsor.promotionalVideos?.[0];
+  return {
+    id: sponsor.id,
+    name: sponsor.name,
+    city: sponsor.city,
+    state: sponsor.state,
+    verified: sponsor.verified,
+    data: sponsor,
+    updated_at: new Date().toISOString(),
+    video_url: firstVideo?.url ?? null,
+    thumbnail_url: sponsor.imageUrl || sponsor.logoUrl || null,
+  };
+}
+
+function buildRemoteManagedCityRow(city: ManagedCity): RemoteManagedCityRow {
+  return {
+    id: city.id,
+    city: city.city,
+    state: city.state,
+    data: city,
+    created_at: city.createdAt || new Date().toISOString(),
+  };
+}
+
+function mapRemoteCouponBatchRow(row: RemoteCouponBatchRow): CouponBatch | null {
+  const data = toRecord(row.data);
+  const id = row.id || String(data.id || '');
+  const sponsorId = row.sponsor_id ?? String(data.sponsorId || '');
+  if (!id || !sponsorId) return null;
+
+  return {
+    id,
+    sponsorId,
+    sponsorName: String(data.sponsorName || ''),
+    quantity: toFiniteNumber(data.quantity, 0),
+    value: toFiniteNumber(data.value, 0),
+    prefix: String(data.prefix || ''),
+    createdAt: String(data.createdAt || row.created_at || new Date().toISOString()),
+    codes: Array.isArray(data.codes) ? (data.codes as string[]) : [],
+  };
+}
+
+function buildRemoteCouponBatchRow(batch: CouponBatch): RemoteCouponBatchRow {
+  return {
+    id: batch.id,
+    sponsor_id: batch.sponsorId,
+    data: batch,
+    created_at: batch.createdAt || new Date().toISOString(),
+  };
+}
+
+function mapRemotePromoQRCodeRow(row: RemotePromoQRCodeRow): PromotionalQR | null {
+  const data = toRecord(row.data);
+  const id = row.id || String(data.id || '');
+  const sponsorId = row.sponsor_id ?? String(data.sponsorId || '');
+  if (!id || !sponsorId) return null;
+
+  return {
+    id,
+    sponsorId,
+    sponsorName: String(data.sponsorName || ''),
+    sponsorAddress: String(data.sponsorAddress || ''),
+    city: row.city ?? String(data.city || ''),
+    state: row.state ?? String(data.state || ''),
+    message: String(data.message || ''),
+    couponValue: toFiniteNumber(data.couponValue, 0),
+    minPurchase: toFiniteNumber(data.minPurchase, 0),
+    createdAt: String(data.createdAt || row.created_at || new Date().toISOString()),
+    active: data.active === undefined ? true : Boolean(data.active),
+  };
+}
+
+function buildRemotePromoQRCodeRow(code: PromotionalQR): RemotePromoQRCodeRow {
+  return {
+    id: code.id,
+    sponsor_id: code.sponsorId,
+    city: code.city,
+    state: code.state,
+    data: code,
+    created_at: code.createdAt || new Date().toISOString(),
+  };
+}
+
+function mapRemoteCityPrizeEventRowToPrize(row: RemoteCityPrizeEventRow): GrandPrize | null {
+  const data = toRecord(row.data);
+  const city = row.city ?? String(data.city || '');
+  if (!city) return null;
+
+  const state = row.state ?? String(data.state || '');
+
+  return {
+    id: String(data.id || row.id || buildCityPrizeRowId(row.city_key || normalizeCityKey(city))),
+    title: String(data.title || `GRANDE PREMIO - ${city}`),
+    value: toFiniteNumber(data.value, 10000),
+    imageUrl: String(data.imageUrl || ''),
+    backgroundImageUrl: data.backgroundImageUrl ? String(data.backgroundImageUrl) : undefined,
+    drawDate: String(data.drawDate || ''),
+    lotteryReference: String(data.lotteryReference || 'Loteria Federal'),
+    description: String(data.description || `Grande premio da cidade de ${city}`),
+    winnerName: data.winnerName ? String(data.winnerName) : undefined,
+    winnerCity: data.winnerCity ? String(data.winnerCity) : undefined,
+    isActive: data.isActive === undefined ? true : Boolean(data.isActive),
+    city,
+    state,
+  };
+}
+
+function buildRemoteCityPrizeEventRow(prize: GrandPrize, existingRow?: RemoteCityPrizeEventRow): RemoteCityPrizeEventRow {
+  const city = (prize.city || existingRow?.city || '').trim();
+  const state = (prize.state || existingRow?.state || '').trim();
+  const cityKey = normalizeCityKey(city || existingRow?.city_key || prize.id || 'city');
+
+  return {
+    id: existingRow?.id || buildCityPrizeRowId(cityKey),
+    campaign_id: CITY_PRIZES_CAMPAIGN_ID,
+    city_key: cityKey,
+    city,
+    state,
+    event_type: CITY_PRIZE_EVENT_TYPE,
+    data: { ...prize, city, state },
+    created_at: existingRow?.created_at || new Date().toISOString(),
+  };
 }
 
 function mapRemoteRowToUserProfile(row: RemoteUserRow): UserProfile {
@@ -122,6 +359,272 @@ async function fetchRemoteAppState<T>(key: string): Promise<T | null> {
   return (rows[0].value ?? null) as T | null;
 }
 
+async function fetchSponsorsTable(): Promise<RemoteSponsorRow[] | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const res = await supabaseRequest('/rest/v1/sponsors?select=*&order=updated_at.desc', { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch sponsors table failed:', errorText);
+    return null;
+  }
+
+  return (await res.json()) as RemoteSponsorRow[];
+}
+
+async function upsertSponsorsTable(sponsors: Sponsor[]): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const currentRows = await fetchSponsorsTable();
+  if (currentRows === null) return false;
+
+  const currentIds = new Set(currentRows.map((row) => row.id));
+  const nextIds = new Set(sponsors.map((sponsor) => sponsor.id));
+
+  if (sponsors.length > 0) {
+    const payload = sponsors.map(buildRemoteSponsorRow);
+    const upsertRes = await supabaseRequest('/rest/v1/sponsors?on_conflict=id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upsertRes.ok) {
+      const errorText = await upsertRes.text();
+      console.log('[DB] Supabase upsert sponsors table failed:', errorText);
+      return false;
+    }
+  }
+
+  const idsToDelete = [...currentIds].filter((id) => !nextIds.has(id));
+  for (const sponsorId of idsToDelete) {
+    const deleteRes = await supabaseRequest(`/rest/v1/sponsors?id=eq.${encodeURIComponent(sponsorId)}`, {
+      method: 'DELETE',
+    });
+    if (!deleteRes.ok) {
+      const errorText = await deleteRes.text();
+      console.log('[DB] Supabase delete sponsor failed:', sponsorId, errorText);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function fetchManagedCitiesTable(): Promise<RemoteManagedCityRow[] | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const res = await supabaseRequest('/rest/v1/managed_cities?select=*&order=created_at.asc', { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch managed_cities table failed:', errorText);
+    return null;
+  }
+
+  return (await res.json()) as RemoteManagedCityRow[];
+}
+
+async function syncManagedCitiesTable(cities: ManagedCity[]): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const currentRows = await fetchManagedCitiesTable();
+  if (currentRows === null) return false;
+
+  const currentIds = new Set(currentRows.map((row) => row.id));
+  const nextIds = new Set(cities.map((city) => city.id));
+
+  if (cities.length > 0) {
+    const payload = cities.map(buildRemoteManagedCityRow);
+    const upsertRes = await supabaseRequest('/rest/v1/managed_cities?on_conflict=id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upsertRes.ok) {
+      const errorText = await upsertRes.text();
+      console.log('[DB] Supabase upsert managed_cities failed:', errorText);
+      return false;
+    }
+  }
+
+  const idsToDelete = [...currentIds].filter((id) => !nextIds.has(id));
+  for (const cityId of idsToDelete) {
+    const deleteRes = await supabaseRequest(`/rest/v1/managed_cities?id=eq.${encodeURIComponent(cityId)}`, {
+      method: 'DELETE',
+    });
+    if (!deleteRes.ok) {
+      const errorText = await deleteRes.text();
+      console.log('[DB] Supabase delete managed city failed:', cityId, errorText);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function fetchCityPrizeEventsTable(): Promise<RemoteCityPrizeEventRow[] | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const query = `/rest/v1/city_prize_events?select=id,campaign_id,city_key,city,state,event_type,data,created_at&campaign_id=eq.${encodeURIComponent(CITY_PRIZES_CAMPAIGN_ID)}&event_type=eq.${encodeURIComponent(CITY_PRIZE_EVENT_TYPE)}&order=city.asc`;
+  const res = await supabaseRequest(query, { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch city_prize_events table failed:', errorText);
+    return null;
+  }
+
+  return (await res.json()) as RemoteCityPrizeEventRow[];
+}
+
+async function syncCityPrizeEventsTable(prizes: Record<string, GrandPrize>): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const currentRows = await fetchCityPrizeEventsTable();
+  if (currentRows === null) return false;
+
+  const currentByCityKey = new Map(currentRows.map((row) => [row.city_key, row]));
+  const payload = Object.entries(prizes)
+    .map(([cityName, prize]) => {
+      const city = (prize.city || cityName).trim();
+      if (!city) return null;
+
+      const cityKey = normalizeCityKey(city);
+      const existingRow = currentByCityKey.get(cityKey);
+      return buildRemoteCityPrizeEventRow({ ...prize, city }, existingRow);
+    })
+    .filter((row): row is RemoteCityPrizeEventRow => Boolean(row));
+
+  if (payload.length > 0) {
+    const upsertRes = await supabaseRequest('/rest/v1/city_prize_events?on_conflict=id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upsertRes.ok) {
+      const errorText = await upsertRes.text();
+      console.log('[DB] Supabase upsert city_prize_events failed:', errorText);
+      return false;
+    }
+  }
+
+  const nextIds = new Set(payload.map((row) => row.id));
+  const idsToDelete = currentRows.map((row) => row.id).filter((id) => !nextIds.has(id));
+  for (const eventId of idsToDelete) {
+    const deleteRes = await supabaseRequest(`/rest/v1/city_prize_events?id=eq.${encodeURIComponent(eventId)}`, {
+      method: 'DELETE',
+    });
+    if (!deleteRes.ok) {
+      const errorText = await deleteRes.text();
+      console.log('[DB] Supabase delete city_prize_event failed:', eventId, errorText);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function fetchCouponBatchesTable(): Promise<RemoteCouponBatchRow[] | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const res = await supabaseRequest('/rest/v1/coupon_batches?select=id,sponsor_id,data,created_at&order=created_at.desc', { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch coupon_batches table failed:', errorText);
+    return null;
+  }
+
+  return (await res.json()) as RemoteCouponBatchRow[];
+}
+
+async function syncCouponBatchesTable(batches: CouponBatch[]): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const currentRows = await fetchCouponBatchesTable();
+  if (currentRows === null) return false;
+
+  if (batches.length > 0) {
+    const payload = batches.map(buildRemoteCouponBatchRow);
+    const upsertRes = await supabaseRequest('/rest/v1/coupon_batches?on_conflict=id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upsertRes.ok) {
+      const errorText = await upsertRes.text();
+      console.log('[DB] Supabase upsert coupon_batches failed:', errorText);
+      return false;
+    }
+  }
+
+  const nextIds = new Set(batches.map((batch) => batch.id));
+  const idsToDelete = currentRows.map((row) => row.id).filter((id) => !nextIds.has(id));
+  for (const batchId of idsToDelete) {
+    const deleteRes = await supabaseRequest(`/rest/v1/coupon_batches?id=eq.${encodeURIComponent(batchId)}`, {
+      method: 'DELETE',
+    });
+    if (!deleteRes.ok) {
+      const errorText = await deleteRes.text();
+      console.log('[DB] Supabase delete coupon_batch failed:', batchId, errorText);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function fetchPromoQRCodesTable(): Promise<RemotePromoQRCodeRow[] | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const res = await supabaseRequest('/rest/v1/promo_qr_codes?select=id,sponsor_id,city,state,data,created_at&order=created_at.desc', { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch promo_qr_codes table failed:', errorText);
+    return null;
+  }
+
+  return (await res.json()) as RemotePromoQRCodeRow[];
+}
+
+async function syncPromoQRCodesTable(codes: PromotionalQR[]): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const currentRows = await fetchPromoQRCodesTable();
+  if (currentRows === null) return false;
+
+  if (codes.length > 0) {
+    const payload = codes.map(buildRemotePromoQRCodeRow);
+    const upsertRes = await supabaseRequest('/rest/v1/promo_qr_codes?on_conflict=id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upsertRes.ok) {
+      const errorText = await upsertRes.text();
+      console.log('[DB] Supabase upsert promo_qr_codes failed:', errorText);
+      return false;
+    }
+  }
+
+  const nextIds = new Set(codes.map((code) => code.id));
+  const idsToDelete = currentRows.map((row) => row.id).filter((id) => !nextIds.has(id));
+  for (const codeId of idsToDelete) {
+    const deleteRes = await supabaseRequest(`/rest/v1/promo_qr_codes?id=eq.${encodeURIComponent(codeId)}`, {
+      method: 'DELETE',
+    });
+    if (!deleteRes.ok) {
+      const errorText = await deleteRes.text();
+      console.log('[DB] Supabase delete promo_qr_code failed:', codeId, errorText);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function upsertRemoteAppState<T>(key: string, value: T): Promise<boolean> {
   if (!hasSupabaseConfig()) return false;
 
@@ -150,6 +653,115 @@ export async function fetchAppState<T>(key: string): Promise<T | null> {
 
 export async function saveAppState<T>(key: string, value: T): Promise<boolean> {
   return upsertRemoteAppState<T>(key, value);
+}
+
+export async function fetchCityPrizes(): Promise<Record<string, GrandPrize>> {
+  if (!hasSupabaseConfig()) return {};
+
+  const tableRows = await fetchCityPrizeEventsTable();
+  if (tableRows !== null) {
+    if (tableRows.length > 0) {
+      console.log('[DB] Using remote city prizes from Supabase city_prize_events table');
+      return tableRows.reduce<Record<string, GrandPrize>>((accumulator, row) => {
+        const prize = mapRemoteCityPrizeEventRowToPrize(row);
+        if (prize?.city) {
+          accumulator[prize.city] = prize;
+        }
+        return accumulator;
+      }, {});
+    }
+
+    console.log('[DB] No rows found in Supabase city_prize_events table');
+  }
+
+  const remoteCityPrizes = await fetchRemoteAppState<Record<string, GrandPrize>>('city_prizes');
+  if (remoteCityPrizes && Object.keys(remoteCityPrizes).length > 0) {
+    console.log('[DB] Using remote city prizes from Supabase app_state');
+    return remoteCityPrizes;
+  }
+
+  console.log('[DB] No remote city prizes found');
+  return {};
+}
+
+export async function fetchCouponBatches(): Promise<CouponBatch[]> {
+  if (!hasSupabaseConfig()) return [];
+
+  const tableRows = await fetchCouponBatchesTable();
+  if (tableRows !== null) {
+    if (tableRows.length > 0) {
+      console.log('[DB] Using remote coupon batches from Supabase coupon_batches table');
+      return tableRows
+        .map(mapRemoteCouponBatchRow)
+        .filter((batch): batch is CouponBatch => Boolean(batch));
+    }
+
+    console.log('[DB] No rows found in Supabase coupon_batches table');
+  }
+
+  const remoteBatches = await fetchRemoteAppState<CouponBatch[]>('coupon_batches');
+  if (remoteBatches && remoteBatches.length > 0) {
+    console.log('[DB] Using remote coupon batches from Supabase app_state');
+    return remoteBatches;
+  }
+
+  console.log('[DB] No remote coupon batches found');
+  return [];
+}
+
+export async function syncCouponBatches(batches: CouponBatch[]): Promise<boolean> {
+  const tableSaved = await syncCouponBatchesTable(batches);
+  if (tableSaved) {
+    void upsertRemoteAppState('coupon_batches', batches);
+    return true;
+  }
+
+  return upsertRemoteAppState('coupon_batches', batches);
+}
+
+export async function fetchPromoQRCodes(): Promise<PromotionalQR[]> {
+  if (!hasSupabaseConfig()) return [];
+
+  const tableRows = await fetchPromoQRCodesTable();
+  if (tableRows !== null) {
+    if (tableRows.length > 0) {
+      console.log('[DB] Using remote promo QR codes from Supabase promo_qr_codes table');
+      return tableRows
+        .map(mapRemotePromoQRCodeRow)
+        .filter((code): code is PromotionalQR => Boolean(code));
+    }
+
+    console.log('[DB] No rows found in Supabase promo_qr_codes table');
+  }
+
+  const remoteCodes = await fetchRemoteAppState<PromotionalQR[]>('promo_qr_codes');
+  if (remoteCodes && remoteCodes.length > 0) {
+    console.log('[DB] Using remote promo QR codes from Supabase app_state');
+    return remoteCodes;
+  }
+
+  console.log('[DB] No remote promo QR codes found');
+  return [];
+}
+
+export async function syncPromoQRCodes(codes: PromotionalQR[]): Promise<boolean> {
+  const tableSaved = await syncPromoQRCodesTable(codes);
+  if (tableSaved) {
+    void upsertRemoteAppState('promo_qr_codes', codes);
+    return true;
+  }
+
+  return upsertRemoteAppState('promo_qr_codes', codes);
+}
+
+export async function syncCityPrizes(prizes: Record<string, GrandPrize>): Promise<boolean> {
+  const tableSaved = await syncCityPrizeEventsTable(prizes);
+  if (tableSaved) {
+    void upsertRemoteAppState('city_prizes', prizes);
+    return true;
+  }
+
+  return upsertRemoteAppState('city_prizes', prizes);
 }
 
 async function upsertUserRemote(profile: UserProfile, balance: number, points: number): Promise<boolean> {
@@ -263,14 +875,24 @@ async function saveUsersMap(map: Record<string, PersistedUserRow>): Promise<void
 
 export async function fetchSponsors(): Promise<Sponsor[]> {
   if (!hasSupabaseConfig()) {
-    console.log('[DB] Using local mock sponsors');
-    return mergeSponsorVideoFallbacks(mockSponsors);
+    console.log('[DB] No remote sponsors: Supabase not configured');
+    return [];
+  }
+
+  const tableSponsors = await fetchSponsorsTable();
+  if (tableSponsors !== null) {
+    if (tableSponsors.length > 0) {
+      console.log('[DB] Using remote sponsors from Supabase sponsors table');
+      return tableSponsors.map(mapRemoteSponsorRowToSponsor);
+    }
+
+    console.log('[DB] No rows found in Supabase sponsors table');
   }
 
   const remoteSponsors = await fetchRemoteAppState<Sponsor[]>('sponsors');
   if (remoteSponsors && remoteSponsors.length > 0) {
     console.log('[DB] Using remote sponsors from Supabase app_state');
-    return mergeSponsorVideoFallbacks(remoteSponsors);
+    return remoteSponsors;
   }
 
   console.log('[DB] No remote sponsors found in Supabase app_state');
@@ -278,7 +900,7 @@ export async function fetchSponsors(): Promise<Sponsor[]> {
 }
 
 export async function upsertSponsor(sponsor: Sponsor): Promise<boolean> {
-  const currentSponsors = (await fetchRemoteAppState<Sponsor[]>('sponsors')) || [];
+  const currentSponsors = await fetchSponsors();
   const existingIndex = currentSponsors.findIndex((item) => item.id === sponsor.id);
 
   if (existingIndex >= 0) {
@@ -287,13 +909,68 @@ export async function upsertSponsor(sponsor: Sponsor): Promise<boolean> {
     currentSponsors.push(sponsor);
   }
 
+  const tableSaved = await upsertSponsorsTable(currentSponsors);
+  if (tableSaved) {
+    await upsertRemoteAppState('sponsors', currentSponsors);
+    return true;
+  }
+
   return upsertRemoteAppState('sponsors', currentSponsors);
 }
 
 export async function removeSponsor(sponsorId: string): Promise<boolean> {
-  const currentSponsors = (await fetchRemoteAppState<Sponsor[]>('sponsors')) || [];
+  const currentSponsors = await fetchSponsors();
   const updatedSponsors = currentSponsors.filter((item) => item.id !== sponsorId);
+  const tableSaved = await upsertSponsorsTable(updatedSponsors);
+  if (tableSaved) {
+    await upsertRemoteAppState('sponsors', updatedSponsors);
+    return true;
+  }
+
   return upsertRemoteAppState('sponsors', updatedSponsors);
+}
+
+export async function syncSponsors(sponsors: Sponsor[]): Promise<boolean> {
+  const tableSaved = await upsertSponsorsTable(sponsors);
+  if (tableSaved) {
+    await upsertRemoteAppState('sponsors', sponsors);
+    return true;
+  }
+
+  return upsertRemoteAppState('sponsors', sponsors);
+}
+
+export async function fetchManagedCities(): Promise<ManagedCity[]> {
+  if (!hasSupabaseConfig()) return [];
+
+  const tableCities = await fetchManagedCitiesTable();
+  if (tableCities !== null) {
+    if (tableCities.length > 0) {
+      console.log('[DB] Using remote managed cities from Supabase managed_cities table');
+      return tableCities.map(mapRemoteManagedCityRow);
+    }
+
+    console.log('[DB] No rows found in Supabase managed_cities table');
+  }
+
+  const remoteCities = await fetchRemoteAppState<ManagedCity[]>('managed_cities');
+  if (remoteCities && remoteCities.length > 0) {
+    console.log('[DB] Using remote managed cities from Supabase app_state');
+    return remoteCities;
+  }
+
+  console.log('[DB] No remote managed cities found');
+  return [];
+}
+
+export async function syncManagedCities(cities: ManagedCity[]): Promise<boolean> {
+  const tableSaved = await syncManagedCitiesTable(cities);
+  if (tableSaved) {
+    await upsertRemoteAppState('managed_cities', cities);
+    return true;
+  }
+
+  return upsertRemoteAppState('managed_cities', cities);
 }
 
 export async function fetchWinners(): Promise<Winner[]> {
@@ -376,13 +1053,25 @@ export async function fetchUser(_userId: string): Promise<UserProfile | null> {
 }
 
 export async function fetchAllUsers(): Promise<{ profile: UserProfile; balance: number; points: number }[]> {
-  const remoteRows = await fetchAllUsersRemote();
-  if (remoteRows.length) return remoteRows;
+  return fetchAllUsersRemote();
+}
 
-  const users = await loadUsersMap();
-  return Object.values(users)
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .map((row) => ({ profile: row.profile, balance: row.balance, points: row.points }));
+export async function upsertUserServerOnly(_profile: UserProfile, _balance: number = 0, _points: number = 0): Promise<boolean> {
+  const email = normalizeEmail(_profile.email || '');
+  if (!email) {
+    console.log('[DB] upsertUserServerOnly skipped: missing email');
+    return false;
+  }
+
+  return upsertUserRemote(
+    {
+      ..._profile,
+      email,
+      createdAt: _profile.createdAt || new Date().toISOString(),
+    },
+    Number.isFinite(_balance) ? _balance : 0,
+    Number.isFinite(_points) ? _points : 0,
+  );
 }
 
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {

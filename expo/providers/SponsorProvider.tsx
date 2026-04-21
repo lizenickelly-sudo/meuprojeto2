@@ -7,8 +7,8 @@ import { Sponsor } from '@/types';
 import { useAuth } from '@/providers/AuthProvider';
 import { readDomainCache, writeDomainCache, invalidateDomainKey } from '@/lib/stateCache';
 import {
-  saveAppState as dbSaveAppState,
   fetchSponsors as dbFetchSponsors,
+  syncSponsors as dbSyncSponsors,
 } from '@/services/database';
 
 const STORAGE_KEYS = {
@@ -53,13 +53,6 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
         await invalidateDomainKey('sponsor', SPONSOR_CACHE_KEYS.SPONSORS);
       }
 
-      const cachedSponsors = await readDomainCache<Sponsor[]>(
-        'sponsor',
-        SPONSOR_CACHE_KEYS.SPONSORS,
-        SPONSOR_CACHE_TTL_MS,
-      );
-      if (cachedSponsors && cachedSponsors.length > 0) return cachedSponsors;
-
       console.log('[SponsorProvider] Fetching sponsors from Supabase...');
       const remoteSponsors = await dbFetchSponsors();
       console.log('[SponsorProvider] Got', remoteSponsors.length, 'sponsors');
@@ -69,15 +62,8 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
         return remoteSponsors;
       }
 
-      const local = await AsyncStorage.getItem(STORAGE_KEYS.SPONSORS);
-      if (local) {
-        const parsed = JSON.parse(local) as Sponsor[];
-        if (parsed.length > 0) {
-          await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, parsed);
-          return parsed;
-        }
-      }
-
+      await AsyncStorage.removeItem(STORAGE_KEYS.SPONSORS);
+      await invalidateDomainKey('sponsor', SPONSOR_CACHE_KEYS.SPONSORS);
       return [];
     },
     enabled: true,
@@ -219,9 +205,13 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
 
   const saveSponsorsMutation = useMutation({
     mutationFn: async (newSponsors: Sponsor[]) => {
+      const saved = await dbSyncSponsors(newSponsors);
+      if (!saved) {
+        throw new Error('Failed to persist sponsors in the server');
+      }
+
       await AsyncStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(newSponsors));
       await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSORS, newSponsors);
-      await dbSaveAppState(SPONSOR_CACHE_KEYS.SPONSORS, newSponsors);
       return newSponsors;
     },
     onSuccess: (data) => {
@@ -440,11 +430,17 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     return map;
   }, [sponsors]);
 
+  const refreshSponsors = useCallback(async () => {
+    await invalidateDomainKey('sponsor', SPONSOR_CACHE_KEYS.SPONSORS);
+    await queryClient.refetchQueries({ queryKey: ['sponsors'], exact: true });
+  }, [queryClient]);
+
   return {
     sponsors,
     addSponsor,
     updateSponsor,
     deleteSponsor,
+    refreshSponsors,
     sponsorsByCity,
     sponsorsByState,
     toggleLikeOffer,

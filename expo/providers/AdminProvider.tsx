@@ -4,11 +4,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { CouponBatch, AdminNotification, GrandPrize, PromotionalQR, ManagedCity } from '@/types';
 import { hashPin, verifyPin } from '@/lib/crypto';
-import { readDomainCache, writeDomainCache } from '@/lib/stateCache';
+import { invalidateDomainKey, readDomainCache, writeDomainCache } from '@/lib/stateCache';
 import {
-  fetchGrandPrize as dbFetchGrandPrize,
   fetchAppState as dbFetchAppState,
   saveAppState as dbSaveAppState,
+  fetchCouponBatches as dbFetchCouponBatches,
+  syncCouponBatches as dbSyncCouponBatches,
+  fetchCityPrizes as dbFetchCityPrizes,
+  syncCityPrizes as dbSyncCityPrizes,
+  fetchManagedCities as dbFetchManagedCities,
+  fetchPromoQRCodes as dbFetchPromoQRCodes,
+  syncManagedCities as dbSyncManagedCities,
+  syncPromoQRCodes as dbSyncPromoQRCodes,
   seedAllToSupabase,
   checkTablesExist,
   getSetupSql,
@@ -41,6 +48,8 @@ const ADMIN_CACHE_KEYS = {
   MANAGED_CITIES: 'managed_cities',
 } as const;
 
+type AdminCacheKey = (typeof ADMIN_CACHE_KEYS)[keyof typeof ADMIN_CACHE_KEYS];
+
 export const [AdminProvider, useAdmin] = createContextHook(() => {
   const queryClient = useQueryClient();
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -51,6 +60,36 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   const [cityImages, setCityImages] = useState<Record<string, string>>({});
   const [promoQRCodes, setPromoQRCodes] = useState<PromotionalQR[]>([]);
   const [managedCities, setManagedCities] = useState<ManagedCity[]>([]);
+
+  const loadRemoteAdminState = useCallback(
+    async function <T>(storageKey: string, cacheKey: AdminCacheKey, emptyValue: T): Promise<T> {
+      const remote = await dbFetchAppState<T>(cacheKey);
+      if (remote !== null && remote !== undefined) {
+        await AsyncStorage.setItem(storageKey, JSON.stringify(remote));
+        await writeDomainCache('admin', cacheKey, remote);
+        return remote;
+      }
+
+      await AsyncStorage.removeItem(storageKey);
+      await invalidateDomainKey('admin', cacheKey);
+      return emptyValue;
+    },
+    [],
+  );
+
+  const persistRemoteAdminState = useCallback(
+    async function <T>(storageKey: string, cacheKey: AdminCacheKey, value: T): Promise<T> {
+      const saved = await dbSaveAppState(cacheKey, value);
+      if (!saved) {
+        throw new Error(`Failed to persist admin state for ${cacheKey}`);
+      }
+
+      await AsyncStorage.setItem(storageKey, JSON.stringify(value));
+      await writeDomainCache('admin', cacheKey, value);
+      return value;
+    },
+    [],
+  );
 
   const adminQuery = useQuery({
     queryKey: ['is_admin'],
@@ -68,77 +107,27 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   const couponBatchesQuery = useQuery({
     queryKey: ['coupon_batches'],
     queryFn: async () => {
-      const cached = await readDomainCache<CouponBatch[]>('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<CouponBatch[]>(ADMIN_CACHE_KEYS.COUPON_BATCHES);
-      if (remote) {
+      const remote = await dbFetchCouponBatches();
+      if (remote.length > 0) {
         await AsyncStorage.setItem(STORAGE_KEYS.COUPON_BATCHES, JSON.stringify(remote));
         await writeDomainCache('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, remote);
         return remote;
       }
 
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.COUPON_BATCHES);
-      const value = stored ? JSON.parse(stored) as CouponBatch[] : [];
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, value);
-      if (value.length > 0) {
-        void dbSaveAppState(ADMIN_CACHE_KEYS.COUPON_BATCHES, value);
-      }
-      return value;
+      await AsyncStorage.removeItem(STORAGE_KEYS.COUPON_BATCHES);
+      await invalidateDomainKey('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES);
+      return [];
     },
   });
 
   const notificationsQuery = useQuery({
     queryKey: ['admin_notifications'],
-    queryFn: async () => {
-      const cached = await readDomainCache<AdminNotification[]>('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<AdminNotification[]>(ADMIN_CACHE_KEYS.NOTIFICATIONS);
-      if (remote) {
-        await AsyncStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(remote));
-        await writeDomainCache('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, remote);
-        return remote;
-      }
-
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-      const value = stored ? JSON.parse(stored) as AdminNotification[] : [];
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, value);
-      if (value.length > 0) {
-        void dbSaveAppState(ADMIN_CACHE_KEYS.NOTIFICATIONS, value);
-      }
-      return value;
-    },
+    queryFn: () => loadRemoteAdminState<AdminNotification[]>(STORAGE_KEYS.NOTIFICATIONS, ADMIN_CACHE_KEYS.NOTIFICATIONS, []),
   });
 
   const grandPrizeQuery = useQuery({
     queryKey: ['grand_prize_config'],
-    queryFn: async () => {
-      const cached = await readDomainCache<GrandPrize>('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<GrandPrize>(ADMIN_CACHE_KEYS.GRAND_PRIZE);
-      if (remote) {
-        await AsyncStorage.setItem(STORAGE_KEYS.GRAND_PRIZE, JSON.stringify(remote));
-        await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, remote);
-        return remote;
-      }
-
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.GRAND_PRIZE);
-      if (stored) {
-        const local = JSON.parse(stored) as GrandPrize;
-        await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, local);
-        void dbSaveAppState(ADMIN_CACHE_KEYS.GRAND_PRIZE, local);
-        return local;
-      }
-
-      console.log('[AdminProvider] Fetching grand prize from Supabase...');
-      const result = await dbFetchGrandPrize();
-      console.log('[AdminProvider] Got grand prize:', result.title);
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, result);
-      void dbSaveAppState(ADMIN_CACHE_KEYS.GRAND_PRIZE, result);
-      return result;
-    },
+    queryFn: () => loadRemoteAdminState<GrandPrize | null>(STORAGE_KEYS.GRAND_PRIZE, ADMIN_CACHE_KEYS.GRAND_PRIZE, null),
     staleTime: 5 * 60 * 1000,
     retry: 2,
   });
@@ -146,69 +135,37 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   const cityPrizesQuery = useQuery({
     queryKey: ['city_prizes'],
     queryFn: async () => {
-      const cached = await readDomainCache<Record<string, GrandPrize>>('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<Record<string, GrandPrize>>(ADMIN_CACHE_KEYS.CITY_PRIZES);
-      if (remote) {
+      const remote = await dbFetchCityPrizes();
+      if (Object.keys(remote).length > 0) {
         await AsyncStorage.setItem(STORAGE_KEYS.CITY_PRIZES, JSON.stringify(remote));
         await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, remote);
         return remote;
       }
 
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.CITY_PRIZES);
-      const value = stored ? JSON.parse(stored) as Record<string, GrandPrize> : {};
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, value);
-      if (Object.keys(value).length > 0) {
-        void dbSaveAppState(ADMIN_CACHE_KEYS.CITY_PRIZES, value);
-      }
-      return value;
+      await AsyncStorage.removeItem(STORAGE_KEYS.CITY_PRIZES);
+      await invalidateDomainKey('admin', ADMIN_CACHE_KEYS.CITY_PRIZES);
+      return {};
     },
   });
 
   const cityImagesQuery = useQuery({
     queryKey: ['city_images'],
-    queryFn: async () => {
-      const cached = await readDomainCache<Record<string, string>>('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<Record<string, string>>(ADMIN_CACHE_KEYS.CITY_IMAGES);
-      if (remote) {
-        await AsyncStorage.setItem(STORAGE_KEYS.CITY_IMAGES, JSON.stringify(remote));
-        await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, remote);
-        return remote;
-      }
-
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.CITY_IMAGES);
-      const value = stored ? JSON.parse(stored) as Record<string, string> : {};
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, value);
-      if (Object.keys(value).length > 0) {
-        void dbSaveAppState(ADMIN_CACHE_KEYS.CITY_IMAGES, value);
-      }
-      return value;
-    },
+    queryFn: () => loadRemoteAdminState<Record<string, string>>(STORAGE_KEYS.CITY_IMAGES, ADMIN_CACHE_KEYS.CITY_IMAGES, {}),
   });
 
   const managedCitiesQuery = useQuery({
     queryKey: ['managed_cities'],
     queryFn: async () => {
-      const cached = await readDomainCache<ManagedCity[]>('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<ManagedCity[]>(ADMIN_CACHE_KEYS.MANAGED_CITIES);
-      if (remote) {
+      const remote = await dbFetchManagedCities();
+      if (remote.length > 0) {
         await AsyncStorage.setItem(STORAGE_KEYS.MANAGED_CITIES, JSON.stringify(remote));
         await writeDomainCache('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, remote);
         return remote;
       }
 
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.MANAGED_CITIES);
-      const value = stored ? JSON.parse(stored) as ManagedCity[] : [];
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, value);
-      if (value.length > 0) {
-        void dbSaveAppState(ADMIN_CACHE_KEYS.MANAGED_CITIES, value);
-      }
-      return value;
+      await AsyncStorage.removeItem(STORAGE_KEYS.MANAGED_CITIES);
+      await invalidateDomainKey('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES);
+      return [];
     },
   });
 
@@ -233,8 +190,15 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   }, [cityPrizesQuery.data]);
 
   useEffect(() => {
-    if (cityImagesQuery.data) setCityImages(cityImagesQuery.data);
-  }, [cityImagesQuery.data]);
+    const nextImages = { ...(cityImagesQuery.data ?? {}) };
+    managedCities.forEach((city) => {
+      const imageUrl = city.imageUrl?.trim();
+      if (imageUrl) {
+        nextImages[city.city] = imageUrl;
+      }
+    });
+    setCityImages(nextImages);
+  }, [cityImagesQuery.data, managedCities]);
 
   useEffect(() => {
     if (managedCitiesQuery.data) setManagedCities(managedCitiesQuery.data);
@@ -243,23 +207,16 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   const promoQRQuery = useQuery({
     queryKey: ['promo_qrcodes'],
     queryFn: async () => {
-      const cached = await readDomainCache<PromotionalQR[]>('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, ADMIN_CACHE_TTL_MS);
-      if (cached) return cached;
-
-      const remote = await dbFetchAppState<PromotionalQR[]>(ADMIN_CACHE_KEYS.PROMO_QR_CODES);
-      if (remote) {
+      const remote = await dbFetchPromoQRCodes();
+      if (remote.length > 0) {
         await AsyncStorage.setItem(STORAGE_KEYS.PROMO_QR_CODES, JSON.stringify(remote));
         await writeDomainCache('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, remote);
         return remote;
       }
 
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.PROMO_QR_CODES);
-      const value = stored ? JSON.parse(stored) as PromotionalQR[] : [];
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, value);
-      if (value.length > 0) {
-        void dbSaveAppState(ADMIN_CACHE_KEYS.PROMO_QR_CODES, value);
-      }
-      return value;
+      await AsyncStorage.removeItem(STORAGE_KEYS.PROMO_QR_CODES);
+      await invalidateDomainKey('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES);
+      return [];
     },
   });
 
@@ -281,9 +238,13 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
 
   const saveCouponBatchesMutation = useMutation({
     mutationFn: async (batches: CouponBatch[]) => {
+      const saved = await dbSyncCouponBatches(batches);
+      if (!saved) {
+        throw new Error('Failed to persist coupon batches in the server');
+      }
+
       await AsyncStorage.setItem(STORAGE_KEYS.COUPON_BATCHES, JSON.stringify(batches));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.COUPON_BATCHES, batches);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.COUPON_BATCHES, batches);
       return batches;
     },
     onSuccess: (data) => {
@@ -293,12 +254,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   });
 
   const saveNotificationsMutation = useMutation({
-    mutationFn: async (notifs: AdminNotification[]) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifs));
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.NOTIFICATIONS, notifs);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.NOTIFICATIONS, notifs);
-      return notifs;
-    },
+    mutationFn: (notifs: AdminNotification[]) => persistRemoteAdminState(STORAGE_KEYS.NOTIFICATIONS, ADMIN_CACHE_KEYS.NOTIFICATIONS, notifs),
     onSuccess: (data) => {
       setNotifications(data);
       queryClient.invalidateQueries({ queryKey: ['admin_notifications'] });
@@ -306,12 +262,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   });
 
   const saveGrandPrizeMutation = useMutation({
-    mutationFn: async (prize: GrandPrize) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.GRAND_PRIZE, JSON.stringify(prize));
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.GRAND_PRIZE, prize);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.GRAND_PRIZE, prize);
-      return prize;
-    },
+    mutationFn: (prize: GrandPrize) => persistRemoteAdminState(STORAGE_KEYS.GRAND_PRIZE, ADMIN_CACHE_KEYS.GRAND_PRIZE, prize),
     onSuccess: (data) => {
       setGrandPrizeConfig(data);
       queryClient.invalidateQueries({ queryKey: ['grand_prize_config'] });
@@ -320,9 +271,13 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
 
   const saveCityPrizesMutation = useMutation({
     mutationFn: async (prizes: Record<string, GrandPrize>) => {
+      const saved = await dbSyncCityPrizes(prizes);
+      if (!saved) {
+        throw new Error('Failed to persist city prizes in the server');
+      }
+
       await AsyncStorage.setItem(STORAGE_KEYS.CITY_PRIZES, JSON.stringify(prizes));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_PRIZES, prizes);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.CITY_PRIZES, prizes);
       return prizes;
     },
     onSuccess: (data) => {
@@ -333,9 +288,13 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
 
   const savePromoQRMutation = useMutation({
     mutationFn: async (codes: PromotionalQR[]) => {
+      const saved = await dbSyncPromoQRCodes(codes);
+      if (!saved) {
+        throw new Error('Failed to persist promo QR codes in the server');
+      }
+
       await AsyncStorage.setItem(STORAGE_KEYS.PROMO_QR_CODES, JSON.stringify(codes));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.PROMO_QR_CODES, codes);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.PROMO_QR_CODES, codes);
       return codes;
     },
     onSuccess: (data) => {
@@ -344,24 +303,15 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     },
   });
 
-  const saveCityImagesMutation = useMutation({
-    mutationFn: async (images: Record<string, string>) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.CITY_IMAGES, JSON.stringify(images));
-      await writeDomainCache('admin', ADMIN_CACHE_KEYS.CITY_IMAGES, images);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.CITY_IMAGES, images);
-      return images;
-    },
-    onSuccess: (data) => {
-      setCityImages(data);
-      queryClient.invalidateQueries({ queryKey: ['city_images'] });
-    },
-  });
-
   const saveManagedCitiesMutation = useMutation({
     mutationFn: async (cities: ManagedCity[]) => {
+      const saved = await dbSyncManagedCities(cities);
+      if (!saved) {
+        throw new Error('Failed to persist managed cities in the server');
+      }
+
       await AsyncStorage.setItem(STORAGE_KEYS.MANAGED_CITIES, JSON.stringify(cities));
       await writeDomainCache('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES, cities);
-      await dbSaveAppState(ADMIN_CACHE_KEYS.MANAGED_CITIES, cities);
       return cities;
     },
     onSuccess: (data) => {
@@ -429,19 +379,43 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     saveGrandPrizeMutation.mutate(prize);
   }, [saveGrandPrizeMutation]);
 
-  const saveCityPrize = useCallback((city: string, prize: GrandPrize) => {
+  const saveCityPrize = useCallback(async (city: string, prize: GrandPrize) => {
     const updated = { ...cityPrizes, [city]: prize };
-    saveCityPrizesMutation.mutate(updated);
+    await saveCityPrizesMutation.mutateAsync(updated);
   }, [cityPrizes, saveCityPrizesMutation]);
 
   const getCityPrize = useCallback((city: string): GrandPrize | null => {
     return cityPrizes[city] ?? null;
   }, [cityPrizes]);
 
-  const saveCityImage = useCallback((city: string, imageUrl: string) => {
-    const updated = { ...cityImages, [city]: imageUrl };
-    saveCityImagesMutation.mutate(updated);
-  }, [cityImages, saveCityImagesMutation]);
+  const saveCityImage = useCallback(async (cityName: string, imageUrl: string, state?: string) => {
+    const normalizedCity = cityName.trim().toLowerCase();
+    const normalizedState = state?.trim().toUpperCase();
+    const existingCity = managedCities.find((city) => (
+      city.city.trim().toLowerCase() === normalizedCity
+      && (!normalizedState || city.state.trim().toUpperCase() === normalizedState)
+    ));
+
+    const nextCity: ManagedCity = existingCity
+      ? {
+        ...existingCity,
+        state: normalizedState || existingCity.state,
+        imageUrl,
+      }
+      : {
+        id: `city_${Date.now()}`,
+        city: cityName.trim(),
+        state: normalizedState || '',
+        imageUrl,
+        createdAt: new Date().toISOString(),
+      };
+
+    const updatedCities = existingCity
+      ? managedCities.map((city) => (city.id === existingCity.id ? nextCity : city))
+      : [...managedCities, nextCity];
+
+    await saveManagedCitiesMutation.mutateAsync(updatedCities);
+  }, [managedCities, saveManagedCitiesMutation]);
 
   const getCityImage = useCallback((city: string): string | null => {
     return cityImages[city] ?? null;
@@ -460,6 +434,11 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     const updated = managedCities.filter((c) => c.id !== cityId);
     saveManagedCitiesMutation.mutate(updated);
   }, [managedCities, saveManagedCitiesMutation]);
+
+  const refreshManagedCities = useCallback(async () => {
+    await invalidateDomainKey('admin', ADMIN_CACHE_KEYS.MANAGED_CITIES);
+    await queryClient.refetchQueries({ queryKey: ['managed_cities'], exact: true });
+  }, [queryClient]);
 
   const addPromoQR = useCallback((promo: PromotionalQR) => {
     const updated = [...promoQRCodes, promo];
@@ -557,5 +536,6 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     managedCities,
     addManagedCity,
     removeManagedCity,
+    refreshManagedCities,
   };
 });

@@ -204,7 +204,7 @@ export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, ci
 
             return (
               <View style={styles.prizeBgWrap}>
-                <Image source={{ uri: bgUrl }} style={styles.prizeBgImgTall} contentFit="cover" cachePolicy="memory-disk" />
+                <Image source={{ uri: bgUrl }} style={styles.prizeBgImgTall} contentFit="cover" contentPosition="center" cachePolicy="memory-disk" />
                 <LinearGradient
                   colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.9)']}
                   locations={[0, 0.5, 1]}

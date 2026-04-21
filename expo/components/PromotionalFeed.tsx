@@ -1,21 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Animated,
-  Dimensions,
-  FlatList,
-  Platform,
-  Linking,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, FlatList, Platform } from 'react-native';
 import { Image } from 'expo-image';
-import { ShoppingBag, MapPin, Heart, MessageCircle, Share2, ChevronRight, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useSponsor } from '@/providers/SponsorProvider';
-import { useUser } from '@/providers/UserProvider';
 import OfferDetailModal from '@/components/OfferDetailModal';
 import type { Offer, Sponsor } from '@/types';
 
@@ -24,69 +12,24 @@ const CARD_W = SCREEN_W - 64;
 const CARD_GAP = 12;
 const SNAP_INTERVAL = CARD_W + CARD_GAP;
 const AUTO_SCROLL_INTERVAL = 4000;
+const CARD_BORDER_BLUE = '#3B82F6';
 
 interface PromotionalItem {
   offer: Offer;
   sponsor: Sponsor;
 }
 
-function openExternalMap(lat: number, lon: number, label: string) {
-  const encoded = encodeURIComponent(label);
-  if (Platform.OS === 'ios') {
-    Linking.openURL(`maps:0,0?q=${encoded}&ll=${lat},${lon}`).catch(() => {
-      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`);
-    });
-  } else if (Platform.OS === 'android') {
-    Linking.openURL(`geo:${lat},${lon}?q=${lat},${lon}(${encoded})`).catch(() => {
-      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`);
-    });
-  } else {
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`);
-  }
-}
-
 function PromotionalCard({
   item,
   onOpenOffer,
-  onGoToStore,
-  onGoToLocation,
-  onLike,
-  onShare,
-  onComment,
-  isLiked,
-  isShared,
 }: {
   item: PromotionalItem;
   onOpenOffer: () => void;
-  onGoToStore: () => void;
-  onGoToLocation: () => void;
-  onLike: () => void;
-  onShare: () => void;
-  onComment: () => void;
-  isLiked: boolean;
-  isShared: boolean;
 }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const heartScale = useRef(new Animated.Value(1)).current;
-  const shareScale = useRef(new Animated.Value(1)).current;
-
-  const handleLike = useCallback(() => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Animated.sequence([
-      Animated.timing(heartScale, { toValue: 1.4, duration: 120, useNativeDriver: true }),
-      Animated.timing(heartScale, { toValue: 1, duration: 120, useNativeDriver: true }),
-    ]).start();
-    onLike();
-  }, [onLike, heartScale]);
-
-  const handleShare = useCallback(() => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Animated.sequence([
-      Animated.timing(shareScale, { toValue: 1.3, duration: 120, useNativeDriver: true }),
-      Animated.timing(shareScale, { toValue: 1, duration: 120, useNativeDriver: true }),
-    ]).start();
-    onShare();
-  }, [onShare, shareScale]);
+  const sponsorAddress = [item.sponsor.address, `${item.sponsor.city} - ${item.sponsor.state}`]
+    .filter(Boolean)
+    .join(' • ');
 
   const handlePressIn = useCallback(() => {
     Animated.spring(scaleAnim, { toValue: 0.97, friction: 8, useNativeDriver: true }).start();
@@ -98,8 +41,23 @@ function PromotionalCard({
 
   return (
     <Animated.View style={[pc.cardOuter, { transform: [{ scale: scaleAnim }] }]}>
-      <View style={pc.card}>
-        <View style={pc.headerRow}>
+      <TouchableOpacity
+        style={pc.card}
+        activeOpacity={0.95}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        onPress={onOpenOffer}
+      >
+        <Image
+          source={{ uri: item.offer.imageUrl }}
+          style={pc.backgroundImage}
+          contentFit="cover"
+          contentPosition="center"
+          cachePolicy="memory-disk"
+          placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+          transition={400}
+        />
+        <View style={pc.infoStrip}>
           <Image
             source={{ uri: item.sponsor.logoUrl }}
             style={pc.sponsorAvatar}
@@ -108,78 +66,12 @@ function PromotionalCard({
             placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
             transition={300}
           />
-          <View style={pc.headerInfo}>
+          <View style={pc.infoTextWrap}>
             <Text style={pc.sponsorName} numberOfLines={1}>{item.sponsor.name}</Text>
-            <Text style={pc.sponsorCat}>{item.sponsor.category} • {item.sponsor.city}</Text>
-          </View>
-          {item.offer.discount && (
-            <View style={pc.discountPill}>
-              <Text style={pc.discountTxt}>{item.offer.discount}</Text>
-            </View>
-          )}
-        </View>
-
-        <TouchableOpacity
-          activeOpacity={0.95}
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          onPress={onOpenOffer}
-        >
-          <View style={pc.imageWrap}>
-            <Image
-              source={{ uri: item.offer.imageUrl }}
-              style={pc.image}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-              transition={400}
-            />
-            <View style={pc.imageOverlay}>
-              <Text style={pc.offerTitle} numberOfLines={2}>{item.offer.title}</Text>
-              <Text style={pc.offerDesc} numberOfLines={1}>{item.offer.description}</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-
-        <View style={pc.actionsRow}>
-          <View style={pc.socialRow}>
-            <TouchableOpacity style={pc.socialBtn} onPress={handleLike} activeOpacity={0.7}>
-              <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-                <Heart
-                  size={22}
-                  color={isLiked ? '#EF4444' : Colors.dark.textMuted}
-                  fill={isLiked ? '#EF4444' : 'transparent'}
-                />
-              </Animated.View>
-              <Text style={pc.socialCount}>{item.offer.likes || 0}</Text>
-              {isLiked && <Check size={10} color={Colors.dark.success} />}
-            </TouchableOpacity>
-            <TouchableOpacity style={pc.socialBtn} onPress={onComment} activeOpacity={0.7}>
-              <MessageCircle size={20} color={Colors.dark.textMuted} />
-              <Text style={pc.socialCount}>{item.offer.comments || 0}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={pc.socialBtn} onPress={handleShare} activeOpacity={0.7}>
-              <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-                <Share2 size={20} color={isShared ? Colors.dark.neonGreen : Colors.dark.textMuted} />
-              </Animated.View>
-              <Text style={pc.socialCount}>{item.offer.shares || 0}</Text>
-              {isShared && <Check size={10} color={Colors.dark.success} />}
-            </TouchableOpacity>
+            <Text style={pc.sponsorAddress} numberOfLines={1}>{sponsorAddress}</Text>
           </View>
         </View>
-
-        <View style={pc.buttonsRow}>
-          <TouchableOpacity style={pc.goStoreBtn} onPress={onGoToStore} activeOpacity={0.8}>
-            <ShoppingBag size={16} color="#FFF" />
-            <Text style={pc.goStoreTxt}>Ir pra Loja</Text>
-            <ChevronRight size={14} color="#FFF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={pc.goLocationBtn} onPress={onGoToLocation} activeOpacity={0.8}>
-            <MapPin size={16} color="#F97316" />
-            <Text style={pc.goLocationTxt}>Ir para Local</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      </TouchableOpacity>
     </Animated.View>
   );
 }
@@ -190,23 +82,38 @@ const pc = StyleSheet.create({
     marginHorizontal: CARD_GAP / 2,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F172A',
     borderRadius: 20,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-    shadowColor: '#000',
+    borderWidth: 2,
+    borderColor: CARD_BORDER_BLUE,
+    minHeight: 240,
+    justifyContent: 'space-between',
+    shadowColor: CARD_BORDER_BLUE,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 4,
   },
-  headerRow: {
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#0F172A',
+  },
+  infoStrip: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     gap: 10,
+    zIndex: 1,
+    borderRadius: 16,
+    backgroundColor: 'rgba(15,23,42,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   sponsorAvatar: {
     width: 40,
@@ -214,153 +121,37 @@ const pc = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: Colors.dark.surfaceLight,
     borderWidth: 2,
-    borderColor: 'rgba(249,115,22,0.18)',
+    borderColor: 'rgba(59,130,246,0.75)',
   },
-  headerInfo: {
+  infoTextWrap: {
     flex: 1,
   },
   sponsorName: {
-    color: Colors.dark.text,
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700' as const,
-  },
-  sponsorCat: {
-    color: Colors.dark.textMuted,
-    fontSize: 11,
-    marginTop: 1,
-  },
-  discountPill: {
-    backgroundColor: '#F97316',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  discountTxt: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '800' as const,
-  },
-  imageWrap: {
-    width: '100%',
-    height: 200,
-    position: 'relative' as const,
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: Colors.dark.surfaceLight,
-  },
-  imageOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 14,
-    paddingTop: 40,
-    backgroundColor: 'transparent',
-    backgroundImage: undefined,
-  },
-  offerTitle: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: '800' as const,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 6,
-  },
-  offerDesc: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 12,
-    marginTop: 2,
-    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowColor: 'rgba(15,23,42,0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  actionsRow: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  socialRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
-  },
-  socialBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  socialCount: {
-    color: Colors.dark.textMuted,
-    fontSize: 12,
-    fontWeight: '600' as const,
-  },
-  buttonsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    paddingTop: 6,
-    gap: 10,
-  },
-  goStoreBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F97316',
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 6,
-  },
-  goStoreTxt: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '700' as const,
-  },
-  goLocationBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(249,115,22,0.1)',
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.25)',
-  },
-  goLocationTxt: {
-    color: '#F97316',
-    fontSize: 13,
-    fontWeight: '700' as const,
+  sponsorAddress: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 11,
+    marginTop: 1,
   },
 });
 
 export default function PromotionalFeed({
-  onGoToStore,
   userCity,
 }: {
-  onGoToStore: (sponsorId: string) => void;
   userCity?: string;
 }) {
-  const {
-    sponsors,
-    toggleLikeOffer: rawToggleLike,
-    shareOffer: rawShare,
-    addOfferComment,
-    isOfferLiked,
-    isOfferShared,
-  } = useSponsor();
-  const { addPoints } = useUser();
-  const toggleLikeOffer = useCallback((offerId: string) => rawToggleLike(offerId, (pts) => addPoints(pts)), [rawToggleLike, addPoints]);
-  const shareOffer = useCallback((offerId: string) => rawShare(offerId, (pts) => addPoints(pts)), [rawShare, addPoints]);
+  const { sponsors } = useSponsor();
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [selectedOfferList, setSelectedOfferList] = useState<Offer[]>([]);
   const [selectedOfferIndex, setSelectedOfferIndex] = useState<number>(0);
   const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
   const [modalVisible, setModalVisible] = useState<boolean>(false);
-  const [openCommentsFirst, setOpenCommentsFirst] = useState<boolean>(false);
   const flatListRef = useRef<FlatList>(null);
   const currentIndex = useRef<number>(0);
   const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -368,10 +159,9 @@ export default function PromotionalFeed({
   const allItems: PromotionalItem[] = useMemo(() => {
     const items: PromotionalItem[] = [];
     const normalizedUserCity = (userCity || '').trim().toLowerCase();
-    const filteredByCity = normalizedUserCity
+    const filtered = normalizedUserCity
       ? sponsors.filter((sp) => sp.city.trim().toLowerCase() === normalizedUserCity)
-      : sponsors;
-    const filtered = filteredByCity.length > 0 ? filteredByCity : sponsors;
+      : [];
     filtered.forEach((sp) => {
       sp.offers.forEach((offer) => {
         items.push({ offer, sponsor: sp });
@@ -451,27 +241,6 @@ export default function PromotionalFeed({
     }
   }, [allItems.length]);
 
-  const handleGoToStore = useCallback((sponsorId: string) => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onGoToStore(sponsorId);
-  }, [onGoToStore]);
-
-  const handleGoToLocation = useCallback((sponsor: Sponsor) => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    openExternalMap(sponsor.latitude, sponsor.longitude, sponsor.name);
-  }, []);
-
-  const handleComment = useCallback((item: PromotionalItem) => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const idx = allItems.findIndex((it) => it.offer.id === item.offer.id && it.sponsor.id === item.sponsor.id);
-    setSelectedOfferList(allItems.map((it) => it.offer));
-    setSelectedOfferIndex(idx >= 0 ? idx : 0);
-    setSelectedOffer(item.offer);
-    setSelectedSponsor(item.sponsor);
-    setOpenCommentsFirst(true);
-    setModalVisible(true);
-  }, [allItems]);
-
   const handleOpenOffer = useCallback((item: PromotionalItem) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const idx = allItems.findIndex((it) => it.offer.id === item.offer.id && it.sponsor.id === item.sponsor.id);
@@ -479,7 +248,6 @@ export default function PromotionalFeed({
     setSelectedOfferIndex(idx >= 0 ? idx : 0);
     setSelectedOffer(item.offer);
     setSelectedSponsor(item.sponsor);
-    setOpenCommentsFirst(false);
     setModalVisible(true);
   }, [allItems]);
 
@@ -489,32 +257,14 @@ export default function PromotionalFeed({
     setSelectedOfferList([]);
     setSelectedOfferIndex(0);
     setSelectedSponsor(null);
-    setOpenCommentsFirst(false);
   }, []);
 
   const renderItem = useCallback(({ item }: { item: PromotionalItem }) => (
     <PromotionalCard
       item={item}
       onOpenOffer={() => handleOpenOffer(item)}
-      onGoToStore={() => handleGoToStore(item.sponsor.id)}
-      onGoToLocation={() => handleGoToLocation(item.sponsor)}
-      onLike={() => {
-        const success = toggleLikeOffer(item.offer.id);
-        if (!success) {
-          console.log('[PromotionalFeed] Already liked offer:', item.offer.id);
-        }
-      }}
-      onShare={() => {
-        const success = shareOffer(item.offer.id);
-        if (!success) {
-          console.log('[PromotionalFeed] Already shared offer:', item.offer.id);
-        }
-      }}
-      onComment={() => handleComment(item)}
-      isLiked={isOfferLiked(item.offer.id)}
-      isShared={isOfferShared(item.offer.id)}
     />
-  ), [handleOpenOffer, handleGoToStore, handleGoToLocation, toggleLikeOffer, shareOffer, handleComment, isOfferLiked, isOfferShared]);
+  ), [handleOpenOffer]);
 
   const keyExtractor = useCallback((_: PromotionalItem, index: number) => `promo-${index}`, []);
 
@@ -567,7 +317,6 @@ export default function PromotionalFeed({
         sponsor={selectedSponsor}
         offerList={selectedOfferList}
         initialIndex={selectedOfferIndex}
-        startWithComments={openCommentsFirst}
         onClose={handleCloseModal}
       />
     </View>

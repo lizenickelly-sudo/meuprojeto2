@@ -5,6 +5,8 @@ import { Stack, useRouter } from 'expo-router';
 import { DollarSign, CheckCircle, AlertTriangle, XCircle, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
+import { formatPixKeyValue } from '@/lib/formatters';
+import { hasPendingUserVerification, isUserVerificationApproved } from '@/lib/userVerification';
 import { useUser } from '@/providers/UserProvider';
 
 export default function WithdrawScreen() {
@@ -16,6 +18,8 @@ export default function WithdrawScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const errorOpacity = useRef(new Animated.Value(0)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
+  const isIdentityVerified = useMemo(() => isUserVerificationApproved(profile), [profile.isActive, profile.adminReviewStatus]);
+  const hasPendingIdentityVerification = useMemo(() => hasPendingUserVerification(profile), [profile.isActive, profile.adminReviewStatus, profile.selfieUrl, profile.documentUrl, profile.cpf]);
 
   const pixKeyLabel = (type: string) => {
     const labels: Record<string, string> = { cpf: 'CPF', phone: 'Telefone', email: 'E-mail', random: 'Chave Aleatória' };
@@ -23,18 +27,24 @@ export default function WithdrawScreen() {
   };
 
   const availableKeys = useMemo(() => {
-    const keys: Array<{ type: string; value: string; label: string }> = [];
+    const keys: { type: string; value: string; label: string; displayValue: string }[] = [];
     if (profile.pixKeys && profile.pixKeys.length > 0) {
-      profile.pixKeys.forEach((k) => keys.push({ type: k.type, value: k.value, label: pixKeyLabel(k.type) }));
+      profile.pixKeys.forEach((k) => keys.push({ type: k.type, value: k.value, label: pixKeyLabel(k.type), displayValue: formatPixKeyValue(k.type, k.value) }));
     } else {
-      if (profile.pixCpf) keys.push({ type: 'cpf', value: profile.pixCpf, label: 'CPF' });
-      if (profile.pixPhone) keys.push({ type: 'phone', value: profile.pixPhone, label: 'Telefone' });
-      if (profile.pixEmail) keys.push({ type: 'email', value: profile.pixEmail, label: 'E-mail' });
-      if (profile.pixRandom) keys.push({ type: 'random', value: profile.pixRandom, label: 'Chave Aleatória' });
-      if (profile.pixKey && keys.length === 0) keys.push({ type: profile.pixKeyType ?? 'random', value: profile.pixKey, label: pixKeyLabel(profile.pixKeyType ?? 'random') });
+      if (profile.pixCpf) keys.push({ type: 'cpf', value: profile.pixCpf, label: 'CPF', displayValue: formatPixKeyValue('cpf', profile.pixCpf) });
+      if (profile.pixPhone) keys.push({ type: 'phone', value: profile.pixPhone, label: 'Telefone', displayValue: formatPixKeyValue('phone', profile.pixPhone) });
+      if (profile.pixEmail) keys.push({ type: 'email', value: profile.pixEmail, label: 'E-mail', displayValue: formatPixKeyValue('email', profile.pixEmail) });
+      if (profile.pixRandom) keys.push({ type: 'random', value: profile.pixRandom, label: 'Chave Aleatória', displayValue: formatPixKeyValue('random', profile.pixRandom) });
+      if (profile.pixKey && keys.length === 0) keys.push({ type: profile.pixKeyType ?? 'random', value: profile.pixKey, label: pixKeyLabel(profile.pixKeyType ?? 'random'), displayValue: formatPixKeyValue(profile.pixKeyType ?? 'random', profile.pixKey) });
     }
     return keys;
   }, [profile]);
+
+  const selectedPixKeyDisplay = useMemo(() => {
+    const selected = availableKeys.find((key) => key.value === selectedPixKey);
+    if (selected) return selected.displayValue;
+    return formatPixKeyValue(profile.pixKeyType ?? 'random', selectedPixKey ?? profile.pixKey);
+  }, [availableKeys, profile.pixKey, profile.pixKeyType, selectedPixKey]);
 
   const [selectedPixKey, setSelectedPixKey] = useState<string | null>(null);
 
@@ -74,11 +84,11 @@ export default function WithdrawScreen() {
     if (val < 1) { showError('O valor mínimo para saque é R$ 1,00'); return; }
     if (val > balance) { showError(`Saldo insuficiente. Seu saldo é R$ ${balance.toFixed(2)}`); return; }
     if (!selectedPixKey) { showError('Selecione uma chave PIX para sacar'); return; }
-    if (!profile.identityVerified) { showError('Verifique sua identidade antes de sacar'); return; }
+    if (!isIdentityVerified) { showError(hasPendingIdentityVerification ? 'Sua verificacao esta em analise. Aguarde a ativacao da conta pelo administrador.' : 'Verifique sua identidade e aguarde a ativacao da conta antes de sacar'); return; }
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     withdraw(val, selectedPixKey);
     setSuccess(true);
-  }, [amount, balance, selectedPixKey, profile, withdraw, showError, clearError]);
+  }, [amount, balance, selectedPixKey, isIdentityVerified, hasPendingIdentityVerification, withdraw, showError, clearError]);
 
   const quickAmounts = [10, 25, 50, 100];
 
@@ -91,7 +101,7 @@ export default function WithdrawScreen() {
           <Text style={w.successTtl}>Saque Solicitado!</Text>
           <Text style={w.successVal}>R$ {parseFloat(amount).toFixed(2)}</Text>
           <Text style={w.successDesc}>O PIX sera enviado para sua chave cadastrada em ate 24 horas.</Text>
-          <Text style={w.successPix}>Chave: {selectedPixKey ?? profile.pixKey}</Text>
+          <Text style={w.successPix}>Chave: {selectedPixKeyDisplay}</Text>
           <TouchableOpacity style={w.successBtn} onPress={() => router.back()} activeOpacity={0.8}>
             <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={w.successBtnG}>
               <Text style={w.successBtnT}>VOLTAR</Text>
@@ -111,10 +121,10 @@ export default function WithdrawScreen() {
           <Text style={w.balVal}>R$ {balance.toFixed(2)}</Text>
         </View>
 
-        {!profile.identityVerified && (
+        {!isIdentityVerified && (
           <View style={w.warnCard}>
             <AlertTriangle size={18} color={Colors.dark.warning} />
-            <Text style={w.warnTxt}>Verifique sua identidade no perfil antes de sacar</Text>
+            <Text style={w.warnTxt}>{hasPendingIdentityVerification ? 'Seus documentos estao em analise. O saque sera liberado quando a conta for ativada.' : 'Verifique sua identidade no perfil e aguarde a ativacao da conta antes de sacar'}</Text>
           </View>
         )}
 
@@ -132,35 +142,42 @@ export default function WithdrawScreen() {
           ))}
         </View>
 
-        {availableKeys.length > 0 ? (
-          <View style={w.pixSection}>
-            <Text style={w.pixSectionLabel}>Chave PIX para receber</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={w.pixKeyScroll} contentContainerStyle={w.pixKeyScrollContent}>
-              {availableKeys.map((key) => {
-                const isSelected = selectedPixKey === key.value;
-                return (
-                  <TouchableOpacity
-                    key={key.value}
-                    style={[w.pixKeyChip, isSelected && w.pixKeyChipSelected]}
-                    onPress={() => setSelectedPixKey(key.value)}
-                    activeOpacity={0.75}
-                  >
-                    <DollarSign size={13} color={isSelected ? '#000' : Colors.dark.neonGreen} />
-                    <View>
-                      <Text style={[w.pixKeyChipType, isSelected && w.pixKeyChipTypeSelected]}>{key.label}</Text>
-                      <Text style={[w.pixKeyChipVal, isSelected && w.pixKeyChipValSelected]} numberOfLines={1}>{key.value}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
+        {isIdentityVerified ? (
+          availableKeys.length > 0 ? (
+            <View style={w.pixSection}>
+              <Text style={w.pixSectionLabel}>Chave PIX para receber</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={w.pixKeyScroll} contentContainerStyle={w.pixKeyScrollContent}>
+                {availableKeys.map((key) => {
+                  const isSelected = selectedPixKey === key.value;
+                  return (
+                    <TouchableOpacity
+                      key={key.value}
+                      style={[w.pixKeyChip, isSelected && w.pixKeyChipSelected]}
+                      onPress={() => setSelectedPixKey(key.value)}
+                      activeOpacity={0.75}
+                    >
+                      <DollarSign size={13} color={isSelected ? '#000' : Colors.dark.neonGreen} />
+                      <View>
+                        <Text style={[w.pixKeyChipType, isSelected && w.pixKeyChipTypeSelected]}>{key.label}</Text>
+                        <Text style={[w.pixKeyChipVal, isSelected && w.pixKeyChipValSelected]} numberOfLines={1}>{key.displayValue}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          ) : (
+            <TouchableOpacity style={w.pixWarn} onPress={() => router.push('/(tabs)/profile')} activeOpacity={0.8}>
+              <AlertTriangle size={16} color={Colors.dark.warning} />
+              <Text style={w.pixWarnTxt}>Nenhuma chave PIX cadastrada</Text>
+              <View style={w.pixWarnAction}><Text style={w.pixWarnActionTxt}>Configurar no Perfil</Text><ChevronRight size={14} color={Colors.dark.neonGreen} /></View>
+            </TouchableOpacity>
+          )
         ) : (
-          <TouchableOpacity style={w.pixWarn} onPress={() => router.push('/(tabs)/profile')} activeOpacity={0.8}>
+          <View style={w.pixLockedCard}>
             <AlertTriangle size={16} color={Colors.dark.warning} />
-            <Text style={w.pixWarnTxt}>Nenhuma chave PIX cadastrada</Text>
-            <View style={w.pixWarnAction}><Text style={w.pixWarnActionTxt}>Configurar no Perfil</Text><ChevronRight size={14} color={Colors.dark.neonGreen} /></View>
-          </TouchableOpacity>
+            <Text style={w.pixLockedText}>{hasPendingIdentityVerification ? 'As chaves PIX ficarão disponíveis após a aprovação do administrador.' : 'As chaves PIX só aparecem depois que sua identidade for verificada e a conta for ativada.'}</Text>
+          </View>
         )}
 
         {errorMsg && (
@@ -172,16 +189,16 @@ export default function WithdrawScreen() {
         )}
 
         <TouchableOpacity
-          style={[w.btn, (!selectedPixKey || !profile.identityVerified) && w.btnDisabled]}
+          style={[w.btn, (!selectedPixKey || !isIdentityVerified) && w.btnDisabled]}
           onPress={handleWithdraw} activeOpacity={0.8}
-          disabled={withdrawPending || !selectedPixKey || !profile.identityVerified} testID="withdraw-btn"
+          disabled={withdrawPending || !selectedPixKey || !isIdentityVerified} testID="withdraw-btn"
         >
           <LinearGradient
-            colors={(!selectedPixKey || !profile.identityVerified) ? [Colors.dark.textMuted, Colors.dark.textMuted] : [Colors.dark.neonGreen, Colors.dark.neonGreenDim]}
+            colors={(!selectedPixKey || !isIdentityVerified) ? [Colors.dark.textMuted, Colors.dark.textMuted] : [Colors.dark.neonGreen, Colors.dark.neonGreenDim]}
             style={w.btnG}
           >
-            <DollarSign size={18} color={(!selectedPixKey || !profile.identityVerified) ? Colors.dark.background : '#000'} />
-            <Text style={[w.btnT, (!selectedPixKey || !profile.identityVerified) && { color: Colors.dark.background }]}>
+            <DollarSign size={18} color={(!selectedPixKey || !isIdentityVerified) ? Colors.dark.background : '#000'} />
+            <Text style={[w.btnT, (!selectedPixKey || !isIdentityVerified) && { color: Colors.dark.background }]}>
               {withdrawPending ? 'PROCESSANDO...' : 'SACAR VIA PIX'}
             </Text>
           </LinearGradient>
@@ -214,6 +231,8 @@ const w = StyleSheet.create({
   pixWarnTxt: { color: Colors.dark.warning, fontSize: 13, fontWeight: '600' as const, flex: 1 },
   pixWarnAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   pixWarnActionTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '700' as const },
+  pixLockedCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,190,11,0.08)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(255,190,11,0.2)', marginBottom: 24 },
+  pixLockedText: { color: Colors.dark.warning, fontSize: 13, fontWeight: '600' as const, flex: 1 },
   pixSection: { marginBottom: 24 },
   pixSectionLabel: { color: Colors.dark.textSecondary, fontSize: 13, fontWeight: '600' as const, marginBottom: 10 },
   pixKeyScroll: { flexGrow: 0 },

@@ -1,8 +1,9 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, AppStateStatus, FlatList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { ArrowLeft, PlayCircle, Volume2, VolumeX } from 'lucide-react-native';
 import SponsorReelFeedItem from '@/components/SponsorReelFeedItem';
 import Colors from '@/constants/colors';
@@ -26,12 +27,24 @@ function normalizeText(value?: string): string {
 
 export default function ReelsScreen() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { sponsors } = useSponsor();
   const { profile } = useUser();
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      setAppState(nextState);
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  const reelsVisible = isFocused && appState === 'active';
 
   const normalizedCity = normalizeText(profile.city);
   const normalizedState = normalizeText(profile.state);
@@ -72,11 +85,12 @@ export default function ReelsScreen() {
       sponsor={item.sponsor}
       video={item.video}
       active={index === activeIndex}
+      visible={reelsVisible}
       soundEnabled={soundEnabled}
       height={height}
       onOpenSponsor={() => handleOpenSponsor(item.sponsor.id)}
     />
-  ), [activeIndex, handleOpenSponsor, height, soundEnabled]);
+  ), [activeIndex, handleOpenSponsor, height, reelsVisible, soundEnabled]);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null; isViewable?: boolean }[] }) => {
