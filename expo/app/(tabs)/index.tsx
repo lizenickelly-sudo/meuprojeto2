@@ -386,7 +386,6 @@ export default function HomeScreen() {
     }
     return (
       <WelcomeSplash
-        userName={profile.name || 'Visitante'}
         userCity={userCity || undefined}
         grandPrizeConfig={userCity ? (cityPrize || grandPrizeConfig) : grandPrizeConfig}
         cityImage={userCity ? cityImage : undefined}

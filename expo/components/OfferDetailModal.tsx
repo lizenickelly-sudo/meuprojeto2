@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { usePathname, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { X, Heart, MessageCircle, Share2, Bookmark, Send } from 'lucide-react-native';
+import { X, Heart, MessageCircle, Share2, Send } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useUser } from '@/providers/UserProvider';
@@ -67,8 +67,7 @@ export default function OfferDetailModal({
   const { addPoints, profile } = useUser();
   const toggleLikeOffer = useCallback((offerId: string) => rawToggleLike(offerId, (pts) => addPoints(pts)), [rawToggleLike, addPoints]);
   const shareOfferFn = useCallback((offerId: string) => rawShare(offerId, (pts) => addPoints(pts)), [rawShare, addPoints]);
-  
-  const [isSaved, setIsSaved] = useState<boolean>(false);
+
   const [showComments, setShowComments] = useState<boolean>(false);
   const [newComment, setNewComment] = useState<string>('');
   const [comments, setComments] = useState<OfferComment[]>([]);
@@ -207,11 +206,6 @@ export default function OfferDetailModal({
     }
   }, [currentOffer, shareOfferFn]);
 
-  const handleSave = useCallback(() => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsSaved((prev) => !prev);
-  }, []);
-
   const handleOpenSponsor = useCallback(() => {
     if (!currentSponsor?.id) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -342,6 +336,43 @@ export default function OfferDetailModal({
               )}
 
               <View style={ms.overlayContent}>
+                {modalEntries.length > 1 && (
+                  <View style={ms.carouselDots}>
+                    {modalEntries.map((_, idx) => (
+                      <View key={`dot-${idx}`} style={[ms.dot, idx === activeIndex && ms.dotActive]} />
+                    ))}
+                  </View>
+                )}
+
+                <View style={ms.bottomRow}>
+                  <View style={ms.detailsSection}>
+                    <Text style={ms.offerDesc}>{currentOffer.description}</Text>
+                  </View>
+
+                  <View style={ms.actionsRail}>
+                    <TouchableOpacity onPress={handleLike} style={ms.actionRailBtn} activeOpacity={0.7}>
+                      <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+                        <Heart
+                          size={28}
+                          color={isOfferLiked(currentOffer.id) ? '#EF4444' : '#FFFFFF'}
+                          fill={isOfferLiked(currentOffer.id) ? '#EF4444' : 'transparent'}
+                        />
+                      </Animated.View>
+                      <Text style={ms.actionRailText}>{likeCount.toLocaleString('pt-BR')}</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={toggleComments} style={ms.actionRailBtn} activeOpacity={0.7}>
+                      <MessageCircle size={26} color="#FFFFFF" />
+                      <Text style={ms.actionRailText}>{commentCount.toLocaleString('pt-BR')}</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={handleShare} style={ms.actionRailBtn} activeOpacity={0.7}>
+                      <Share2 size={25} color={isOfferShared(currentOffer.id) ? Colors.dark.neonGreen : '#FFFFFF'} />
+                      <Text style={ms.actionRailText}>{shareCount.toLocaleString('pt-BR')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
                 <TouchableOpacity style={ms.overlaySponsorChip} onPress={handleOpenSponsor} activeOpacity={0.85}>
                   <Image
                     source={{ uri: currentSponsor?.logoUrl || currentSponsor?.imageUrl || currentOffer.imageUrl }}
@@ -356,53 +387,6 @@ export default function OfferDetailModal({
                     <Text style={ms.overlaySponsorAddress} numberOfLines={2}>{currentSponsorAddress || 'Patrocinador parceiro'}</Text>
                   </View>
                 </TouchableOpacity>
-
-                {modalEntries.length > 1 && (
-                  <View style={ms.carouselDots}>
-                    {modalEntries.map((_, idx) => (
-                      <View key={`dot-${idx}`} style={[ms.dot, idx === activeIndex && ms.dotActive]} />
-                    ))}
-                  </View>
-                )}
-
-                <View style={ms.actionsRow}>
-                  <View style={ms.actionsLeft}>
-                    <TouchableOpacity onPress={handleLike} style={ms.actionBtn} activeOpacity={0.7}>
-                      <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-                        <Heart
-                          size={26}
-                          color={isOfferLiked(currentOffer.id) ? '#EF4444' : '#FFFFFF'}
-                          fill={isOfferLiked(currentOffer.id) ? '#EF4444' : 'transparent'}
-                        />
-                      </Animated.View>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={toggleComments} style={ms.actionBtn} activeOpacity={0.7}>
-                      <MessageCircle size={25} color="#FFFFFF" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={handleShare} style={ms.actionBtn} activeOpacity={0.7}>
-                      <Share2 size={24} color={isOfferShared(currentOffer.id) ? Colors.dark.neonGreen : '#FFFFFF'} />
-                    </TouchableOpacity>
-                  </View>
-                  <TouchableOpacity onPress={handleSave} style={ms.actionBtn} activeOpacity={0.7}>
-                    <Bookmark
-                      size={25}
-                      color={isSaved ? Colors.dark.primary : '#FFFFFF'}
-                      fill={isSaved ? Colors.dark.primary : 'transparent'}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={ms.detailsSection}>
-                  <Text style={ms.likeCount}>{likeCount.toLocaleString('pt-BR')} curtidas • {shareCount.toLocaleString('pt-BR')} compartilhamentos</Text>
-                  <Text style={ms.offerTitle}>{currentOffer.title}</Text>
-                  <Text style={ms.offerDesc}>{currentOffer.description}</Text>
-
-                  <TouchableOpacity onPress={toggleComments} activeOpacity={0.7}>
-                    <Text style={ms.viewComments}>
-                      Ver todos os {commentCount.toLocaleString('pt-BR')} comentarios
-                    </Text>
-                  </TouchableOpacity>
-                </View>
               </View>
             </View>
           ) : (
@@ -498,21 +482,6 @@ const ms = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
   },
-  carouselDots: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 6,
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.45)',
-  },
-  dotActive: {
-    backgroundColor: '#FFFFFF',
-    width: 18,
-  },
   reelPage: {
     width: SCREEN_W,
     backgroundColor: '#050505',
@@ -547,19 +516,19 @@ const ms = StyleSheet.create({
     left: 16,
     right: 16,
     bottom: 18,
+    gap: 12,
   },
   overlaySponsorChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    alignSelf: 'flex-start',
-    maxWidth: '92%',
+    width: '100%',
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.36)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   overlaySponsorAvatar: {
     width: 42,
@@ -579,50 +548,57 @@ const ms = StyleSheet.create({
   overlaySponsorAddress: {
     color: 'rgba(255,255,255,0.74)',
     fontSize: 12,
+    width: '100%',
     lineHeight: 17,
   },
-  actionsRow: {
+  carouselDots: {
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.45)',
+  },
+  dotActive: {
+    backgroundColor: '#FFFFFF',
+    width: 18,
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
+    gap: 18,
     paddingTop: 14,
-    paddingBottom: 10,
   },
-  actionsLeft: {
-    flexDirection: 'row',
+  actionsRail: {
     alignItems: 'center',
-    gap: 14,
+    gap: 18,
   },
-  actionBtn: {
-    padding: 4,
+  actionRailBtn: {
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 48,
+  },
+  actionRailText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700' as const,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   detailsSection: {
+    flex: 1,
     paddingBottom: 8,
-  },
-  likeCount: {
-    fontSize: 14,
-    fontWeight: '700' as const,
-    color: '#FFFFFF',
-    marginBottom: 6,
-  },
-  offerTitle: {
-    fontSize: 26,
-    color: '#FFFFFF',
-    lineHeight: 31,
-    fontWeight: '900' as const,
-    marginBottom: 4,
   },
   offerDesc: {
     fontSize: 14,
     color: 'rgba(255,255,255,0.78)',
     lineHeight: 20,
-    marginBottom: 8,
-  },
-  viewComments: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.78)',
-    marginTop: 4,
-    fontWeight: '700' as const,
+    maxWidth: '92%',
   },
   commentInputWrap: {
     flexDirection: 'row',

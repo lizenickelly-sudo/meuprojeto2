@@ -59,6 +59,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import Colors from '@/constants/colors';
+import ImageCanvasEditorModal, { mapPickerAssetToImageCanvasAsset, type ImageCanvasEditorSession } from '@/components/ImageCanvasEditorModal';
 import { formatCPF, formatPhone, formatPixKeyValue } from '@/lib/formatters';
 import {
   getAdminImageBucketName,
@@ -256,6 +257,20 @@ interface SponsorFormData {
   offers: OfferFormItem[];
 }
 
+type SponsorFormSectionKey = 'basic' | 'images' | 'videos' | 'offers' | 'gallery' | 'address' | 'coupon';
+
+function getInitialSponsorFormSections(): Record<SponsorFormSectionKey, boolean> {
+  return {
+    basic: false,
+    images: false,
+    videos: false,
+    offers: false,
+    gallery: false,
+    address: false,
+    coupon: false,
+  };
+}
+
 const emptySponsorForm: SponsorFormData = {
   name: '',
   category: '',
@@ -303,6 +318,8 @@ function SponsorFormModal({
   const [offerDiscount, setOfferDiscount] = useState<string>('');
   const [offerImageUrl, setOfferImageUrl] = useState<string>('');
   const [loadingLocation, setLoadingLocation] = useState<boolean>(false);
+  const [imageCanvasSession, setImageCanvasSession] = useState<ImageCanvasEditorSession | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<SponsorFormSectionKey, boolean>>(() => getInitialSponsorFormSections());
 
   const updateField = useCallback((key: keyof SponsorFormData, value: string | boolean | SponsorImage[] | SponsorVideo[] | OfferFormItem[]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -378,12 +395,21 @@ function SponsorFormModal({
   const pickImage = useCallback(async (field: 'imageUrl' | 'logoUrl') => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: field === 'logoUrl' ? [1, 1] : [16, 9],
+      allowsEditing: false,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      updateField(field, result.assets[0].uri);
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: field === 'logoUrl' ? 'Editar logo' : 'Editar imagem principal',
+        description: 'Ajuste a imagem antes de usar no patrocinador.',
+        aspectRatio: field === 'logoUrl' ? 1 : 16 / 9,
+        confirmLabel: field === 'logoUrl' ? 'USAR ESTE LOGO' : 'USAR ESTA IMAGEM',
+        onConfirm: async (editedAsset) => {
+          updateField(field, editedAsset.uri);
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        },
+      });
     }
   }, [updateField]);
 
@@ -394,20 +420,29 @@ function SponsorFormModal({
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
+      allowsEditing: false,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      const newImg: SponsorImage = {
-        id: `img_${Date.now()}`,
-        url: result.assets[0].uri,
-        price: newImgPrice ? parseFloat(newImgPrice) : undefined,
-        label: newImgLabel.trim() || undefined,
-      };
-      updateField('galleryImages', [...form.galleryImages, newImg]);
-      setNewImgPrice('');
-      setNewImgLabel('');
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: 'Editar imagem da galeria',
+        description: 'Ajuste a imagem quadrada antes de adicionar na galeria.',
+        aspectRatio: 1,
+        confirmLabel: 'ADICIONAR NA GALERIA',
+        onConfirm: async (editedAsset) => {
+          const newImg: SponsorImage = {
+            id: `img_${Date.now()}`,
+            url: editedAsset.uri,
+            price: newImgPrice ? parseFloat(newImgPrice) : undefined,
+            label: newImgLabel.trim() || undefined,
+          };
+          updateField('galleryImages', [...form.galleryImages, newImg]);
+          setNewImgPrice('');
+          setNewImgLabel('');
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        },
+      });
     }
   }, [form.galleryImages, newImgPrice, newImgLabel, updateField]);
 
@@ -540,14 +575,54 @@ function SponsorFormModal({
   const pickOfferImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
+      allowsEditing: false,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      setOfferImageUrl(result.assets[0].uri);
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: 'Editar imagem da promocao',
+        description: 'Ajuste a arte da promocao antes de salvar.',
+        aspectRatio: 16 / 9,
+        confirmLabel: 'USAR NA PROMOCAO',
+        onConfirm: async (editedAsset) => {
+          setOfferImageUrl(editedAsset.uri);
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        },
+      });
     }
   }, []);
+
+  const toggleSection = useCallback((section: SponsorFormSectionKey) => {
+    setExpandedSections((prev) => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
+  }, []);
+
+  const renderSponsorSection = (
+    section: SponsorFormSectionKey,
+    title: string,
+    children: React.ReactNode,
+    subtitle?: string,
+  ) => {
+    const expanded = expandedSections[section];
+
+    return (
+      <View style={fm.section}>
+        <TouchableOpacity style={fm.sectionToggle} onPress={() => toggleSection(section)} activeOpacity={0.8}>
+          <Text style={fm.sectionToggleTitle}>{title}</Text>
+          {expanded ? <ChevronDown size={18} color={Colors.dark.textMuted} /> : <ChevronRight size={18} color={Colors.dark.textMuted} />}
+        </TouchableOpacity>
+        {expanded ? (
+          <View style={fm.sectionBody}>
+            {subtitle ? <Text style={fm.sectionSub}>{subtitle}</Text> : null}
+            {children}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
 
   React.useEffect(() => {
     if (visible) {
@@ -556,6 +631,8 @@ function SponsorFormModal({
       setNewImgLabel('');
       setNewVideoTitle('');
       setUploadingVideo(false);
+      setImageCanvasSession(null);
+      setExpandedSections(getInitialSponsorFormSections());
       resetOfferFields();
     }
   }, [visible, initialData, resetOfferFields]);
@@ -581,277 +658,290 @@ function SponsorFormModal({
           contentContainerStyle={fm.scroll}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Informacoes Basicas</Text>
-            <View style={fm.field}>
-              <Text style={fm.label}>Nome da Loja *</Text>
-              <TextInput style={fm.input} value={form.name} onChangeText={(v) => updateField('name', v)} placeholder="Ex: Supermercado Bom Preco" placeholderTextColor={Colors.dark.textMuted} testID="sponsor-name-input" />
-            </View>
-            <View style={fm.field}>
-              <Text style={fm.label}>Categoria *</Text>
-              <TextInput style={fm.input} value={form.category} onChangeText={(v) => updateField('category', v)} placeholder="Ex: Supermercado, Farmacia" placeholderTextColor={Colors.dark.textMuted} testID="sponsor-category-input" />
-            </View>
-            <View style={fm.field}>
-              <Text style={fm.label}>Descricao</Text>
-              <TextInput style={[fm.input, fm.textArea]} value={form.description} onChangeText={(v) => updateField('description', v)} placeholder="Breve descricao da loja" placeholderTextColor={Colors.dark.textMuted} multiline numberOfLines={3} testID="sponsor-desc-input" />
-            </View>
-          </View>
-
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Imagens Principais</Text>
-            <View style={fm.field}>
-              <Text style={fm.label}>Imagem Principal</Text>
-              <TouchableOpacity style={fm.uploadBtn} onPress={() => pickImage('imageUrl')} activeOpacity={0.8} testID="sponsor-image-input">
-                {form.imageUrl ? (
-                  <Image source={{ uri: form.imageUrl }} style={fm.uploadPreview} contentFit="cover" />
-                ) : (
-                  <View style={fm.uploadPlaceholder}>
-                    <ImageIcon size={28} color={Colors.dark.neonGreen} />
-                    <Text style={fm.uploadPlaceholderTxt}>Toque para escolher foto</Text>
-                  </View>
-                )}
-                {form.imageUrl ? (
-                  <View style={fm.uploadOverlay}>
-                    <ImageIcon size={14} color="#fff" />
-                    <Text style={fm.uploadOverlayTxt}>Trocar Foto</Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            </View>
-            <View style={fm.field}>
-              <Text style={fm.label}>Logo</Text>
-              <TouchableOpacity style={fm.uploadLogoBtn} onPress={() => pickImage('logoUrl')} activeOpacity={0.8} testID="sponsor-logo-input">
-                {form.logoUrl ? (
-                  <Image source={{ uri: form.logoUrl }} style={fm.uploadLogoPreview} contentFit="cover" />
-                ) : (
-                  <View style={fm.uploadLogoPlaceholder}>
-                    <ImageIcon size={22} color={Colors.dark.neonGreen} />
-                  </View>
-                )}
-                <View style={fm.uploadLogoInfo}>
-                  <Text style={fm.uploadLogoTxt}>{form.logoUrl ? 'Trocar logo' : 'Escolher logo'}</Text>
-                  <Text style={fm.uploadLogoSub}>Formato quadrado recomendado</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Videos Promocionais ({form.promotionalVideos.length}/{MAX_PROMOTIONAL_VIDEOS})</Text>
-            <Text style={fm.sectionSub}>Envie videos da loja para salvar no Supabase e exibir no perfil publico</Text>
-            {form.promotionalVideos.map((video) => (
-              <View key={video.id} style={fm.videoItem}>
-                <View style={fm.videoThumbPlaceholder}>
-                  <PlayCircle size={20} color={Colors.dark.neonGreen} />
-                </View>
-                <View style={fm.videoInfo}>
-                  <Text style={fm.videoTitle} numberOfLines={1}>{video.title || video.fileName || 'Video promocional'}</Text>
-                  <Text style={fm.videoMeta} numberOfLines={1}>
-                    {formatVideoDuration(video.durationSeconds)}
-                    {video.fileName ? ` • ${video.fileName}` : ''}
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={() => handleRemovePromotionalVideo(video.id)} style={fm.galleryRemove}>
-                  <X size={14} color={Colors.dark.danger} />
-                </TouchableOpacity>
-              </View>
-            ))}
-
-            {form.promotionalVideos.length < MAX_PROMOTIONAL_VIDEOS && (
-              <View style={fm.addImgSection}>
-                <View style={fm.field}>
-                  <Text style={fm.label}>Titulo do Video (opcional)</Text>
-                  <TextInput
-                    style={fm.input}
-                    value={newVideoTitle}
-                    onChangeText={setNewVideoTitle}
-                    placeholder="Ex: Tour da loja, ofertas da semana"
-                    placeholderTextColor={Colors.dark.textMuted}
-                  />
-                </View>
-                <TouchableOpacity
-                  style={[fm.addVideoBtn, uploadingVideo && fm.addVideoBtnDisabled]}
-                  onPress={pickPromotionalVideo}
-                  activeOpacity={0.8}
-                  disabled={uploadingVideo}
-                >
-                  {uploadingVideo ? <ActivityIndicator color="#000" size="small" /> : <PlayCircle size={16} color="#000" />}
-                  <Text style={[fm.addVideoBtnTxt, uploadingVideo && fm.addVideoBtnTxtDisabled]}>
-                    {uploadingVideo ? 'Enviando video...' : 'Escolher e enviar video'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={fm.videoSetupBtn}
-                  onPress={() => {
-                    void copySponsorVideoStorageSql();
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Copy size={14} color={Colors.dark.neonGreen} />
-                  <Text style={fm.videoSetupBtnTxt}>Copiar SQL do Storage</Text>
-                </TouchableOpacity>
-                <Text style={fm.videoHint}>
-                  Bucket atual: {getSponsorVideoBucketName()}. Se o upload falhar, execute esse SQL no Supabase para criar o bucket e liberar leitura/upload para o app.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Promocoes / Ofertas ({form.offers.length})</Text>
-            <Text style={fm.sectionSub}>Adicione promocoes e ofertas que aparecerao no perfil da loja</Text>
-            {form.offers.map((offer, idx) => (
-              <View key={offer.id} style={fm.offerItem}>
-                {offer.imageUrl ? (
-                  <Image source={{ uri: offer.imageUrl }} style={fm.offerThumb} contentFit="cover" />
-                ) : (
-                  <View style={[fm.offerThumb, fm.offerThumbPlaceholder]}>
-                    <Gift size={16} color={Colors.dark.textMuted} />
-                  </View>
-                )}
-                <View style={fm.offerInfo}>
-                  <Text style={fm.offerTitle} numberOfLines={1}>{offer.title}</Text>
-                  {offer.discount ? <Text style={fm.offerDiscount}>{offer.discount}</Text> : null}
-                  {offer.description ? <Text style={fm.offerDesc} numberOfLines={1}>{offer.description}</Text> : null}
-                </View>
-                <TouchableOpacity onPress={() => handleEditOffer(idx)} style={fm.offerEditBtn}>
-                  <Edit3 size={13} color={Colors.dark.neonGreen} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleRemoveOffer(idx)} style={fm.galleryRemove}>
-                  <X size={14} color={Colors.dark.danger} />
-                </TouchableOpacity>
-              </View>
-            ))}
-
-            <View style={fm.addImgSection}>
-              <Text style={[fm.label, { marginBottom: 2 }]}>{editingOfferIdx !== null ? 'Editando Promocao' : 'Nova Promocao'}</Text>
+          {renderSponsorSection('basic', 'Informacoes Basicas', (
+            <>
               <View style={fm.field}>
-                <Text style={fm.label}>Titulo *</Text>
-                <TextInput style={fm.input} value={offerTitle} onChangeText={setOfferTitle} placeholder="Ex: 20% OFF em toda a loja" placeholderTextColor={Colors.dark.textMuted} testID="offer-title-input" />
+                <Text style={fm.label}>Nome da Loja *</Text>
+                <TextInput style={fm.input} value={form.name} onChangeText={(v) => updateField('name', v)} placeholder="Ex: Supermercado Bom Preco" placeholderTextColor={Colors.dark.textMuted} testID="sponsor-name-input" />
               </View>
               <View style={fm.field}>
-                <Text style={fm.label}>Desconto</Text>
-                <TextInput style={fm.input} value={offerDiscount} onChangeText={setOfferDiscount} placeholder="Ex: 20% OFF, R$ 10 desconto" placeholderTextColor={Colors.dark.textMuted} />
+                <Text style={fm.label}>Categoria *</Text>
+                <TextInput style={fm.input} value={form.category} onChangeText={(v) => updateField('category', v)} placeholder="Ex: Supermercado, Farmacia" placeholderTextColor={Colors.dark.textMuted} testID="sponsor-category-input" />
               </View>
               <View style={fm.field}>
                 <Text style={fm.label}>Descricao</Text>
-                <TextInput style={[fm.input, { minHeight: 60, textAlignVertical: 'top' as const }]} value={offerDesc} onChangeText={setOfferDesc} placeholder="Descricao da promocao" placeholderTextColor={Colors.dark.textMuted} multiline />
+                <TextInput style={[fm.input, fm.textArea]} value={form.description} onChangeText={(v) => updateField('description', v)} placeholder="Breve descricao da loja" placeholderTextColor={Colors.dark.textMuted} multiline numberOfLines={3} testID="sponsor-desc-input" />
               </View>
+            </>
+          ))}
+
+          {renderSponsorSection('images', 'Imagens Principais', (
+            <>
               <View style={fm.field}>
-                <Text style={fm.label}>Imagem da Promocao</Text>
-                <TouchableOpacity style={fm.offerImgPickBtn} onPress={pickOfferImage} activeOpacity={0.8}>
-                  {offerImageUrl ? (
-                    <Image source={{ uri: offerImageUrl }} style={fm.offerImgPreview} contentFit="cover" />
+                <Text style={fm.label}>Imagem Principal</Text>
+                <TouchableOpacity style={fm.uploadBtn} onPress={() => pickImage('imageUrl')} activeOpacity={0.8} testID="sponsor-image-input">
+                  {form.imageUrl ? (
+                    <Image source={{ uri: form.imageUrl }} style={fm.uploadPreview} contentFit="cover" />
                   ) : (
-                    <View style={fm.offerImgPlaceholder}>
-                      <ImageIcon size={20} color={Colors.dark.neonGreen} />
-                      <Text style={fm.offerImgPlaceholderTxt}>Escolher Imagem</Text>
+                    <View style={fm.uploadPlaceholder}>
+                      <ImageIcon size={28} color={Colors.dark.neonGreen} />
+                      <Text style={fm.uploadPlaceholderTxt}>Toque para escolher foto</Text>
                     </View>
                   )}
+                  {form.imageUrl ? (
+                    <View style={fm.uploadOverlay}>
+                      <ImageIcon size={14} color="#fff" />
+                      <Text style={fm.uploadOverlayTxt}>Trocar Foto</Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               </View>
-              <View style={fm.offerBtnRow}>
-                <TouchableOpacity style={fm.offerSaveBtn} onPress={handleAddOffer} activeOpacity={0.8}>
-                  <Save size={14} color="#000" />
-                  <Text style={fm.offerSaveBtnTxt}>{editingOfferIdx !== null ? 'Atualizar' : 'Adicionar'}</Text>
+              <View style={fm.field}>
+                <Text style={fm.label}>Logo</Text>
+                <TouchableOpacity style={fm.uploadLogoBtn} onPress={() => pickImage('logoUrl')} activeOpacity={0.8} testID="sponsor-logo-input">
+                  {form.logoUrl ? (
+                    <Image source={{ uri: form.logoUrl }} style={fm.uploadLogoPreview} contentFit="cover" />
+                  ) : (
+                    <View style={fm.uploadLogoPlaceholder}>
+                      <ImageIcon size={22} color={Colors.dark.neonGreen} />
+                    </View>
+                  )}
+                  <View style={fm.uploadLogoInfo}>
+                    <Text style={fm.uploadLogoTxt}>{form.logoUrl ? 'Trocar logo' : 'Escolher logo'}</Text>
+                    <Text style={fm.uploadLogoSub}>Formato quadrado recomendado</Text>
+                  </View>
                 </TouchableOpacity>
-                {editingOfferIdx !== null && (
-                  <TouchableOpacity style={fm.offerCancelBtn} onPress={resetOfferFields} activeOpacity={0.8}>
-                    <X size={14} color={Colors.dark.textMuted} />
-                    <Text style={fm.offerCancelBtnTxt}>Cancelar</Text>
+              </View>
+            </>
+          ))}
+
+          {renderSponsorSection(
+            'videos',
+            `Videos Promocionais (${form.promotionalVideos.length}/${MAX_PROMOTIONAL_VIDEOS})`,
+            <>
+              {form.promotionalVideos.map((video) => (
+                <View key={video.id} style={fm.videoItem}>
+                  <View style={fm.videoThumbPlaceholder}>
+                    <PlayCircle size={20} color={Colors.dark.neonGreen} />
+                  </View>
+                  <View style={fm.videoInfo}>
+                    <Text style={fm.videoTitle} numberOfLines={1}>{video.title || video.fileName || 'Video promocional'}</Text>
+                    <Text style={fm.videoMeta} numberOfLines={1}>
+                      {formatVideoDuration(video.durationSeconds)}
+                      {video.fileName ? ` • ${video.fileName}` : ''}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => handleRemovePromotionalVideo(video.id)} style={fm.galleryRemove}>
+                    <X size={14} color={Colors.dark.danger} />
                   </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          </View>
-
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Galeria de Imagens ({form.galleryImages.length}/10)</Text>
-            <Text style={fm.sectionSub}>Adicione ate 10 imagens com precos para exibir no perfil</Text>
-            {form.galleryImages.map((img) => (
-              <View key={img.id} style={fm.galleryItem}>
-                <Image source={{ uri: img.url }} style={fm.galleryThumb} contentFit="cover" />
-                <View style={fm.galleryInfo}>
-                  <Text style={fm.galleryLabel} numberOfLines={1}>{img.label || 'Sem titulo'}</Text>
-                  {img.price !== undefined && <Text style={fm.galleryPrice}>R$ {img.price.toFixed(2)}</Text>}
                 </View>
-                <TouchableOpacity onPress={() => handleRemoveGalleryImage(img.id)} style={fm.galleryRemove}>
-                  <X size={14} color={Colors.dark.danger} />
-                </TouchableOpacity>
-              </View>
-            ))}
-            {form.galleryImages.length < 10 && (
+              ))}
+
+              {form.promotionalVideos.length < MAX_PROMOTIONAL_VIDEOS && (
+                <View style={fm.addImgSection}>
+                  <View style={fm.field}>
+                    <Text style={fm.label}>Titulo do Video (opcional)</Text>
+                    <TextInput
+                      style={fm.input}
+                      value={newVideoTitle}
+                      onChangeText={setNewVideoTitle}
+                      placeholder="Ex: Tour da loja, ofertas da semana"
+                      placeholderTextColor={Colors.dark.textMuted}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={[fm.addVideoBtn, uploadingVideo && fm.addVideoBtnDisabled]}
+                    onPress={pickPromotionalVideo}
+                    activeOpacity={0.8}
+                    disabled={uploadingVideo}
+                  >
+                    {uploadingVideo ? <ActivityIndicator color="#000" size="small" /> : <PlayCircle size={16} color="#000" />}
+                    <Text style={[fm.addVideoBtnTxt, uploadingVideo && fm.addVideoBtnTxtDisabled]}>
+                      {uploadingVideo ? 'Enviando video...' : 'Escolher e enviar video'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={fm.videoSetupBtn}
+                    onPress={() => {
+                      void copySponsorVideoStorageSql();
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Copy size={14} color={Colors.dark.neonGreen} />
+                    <Text style={fm.videoSetupBtnTxt}>Copiar SQL do Storage</Text>
+                  </TouchableOpacity>
+                  <Text style={fm.videoHint}>
+                    Bucket atual: {getSponsorVideoBucketName()}. Se o upload falhar, execute esse SQL no Supabase para criar o bucket e liberar leitura/upload para o app.
+                  </Text>
+                </View>
+              )}
+            </>,
+            'Envie videos da loja para salvar no Supabase e exibir no perfil publico',
+          )}
+
+          {renderSponsorSection(
+            'offers',
+            `Promocoes / Ofertas (${form.offers.length})`,
+            <>
+              {form.offers.map((offer, idx) => (
+                <View key={offer.id} style={fm.offerItem}>
+                  {offer.imageUrl ? (
+                    <Image source={{ uri: offer.imageUrl }} style={fm.offerThumb} contentFit="cover" />
+                  ) : (
+                    <View style={[fm.offerThumb, fm.offerThumbPlaceholder]}>
+                      <Gift size={16} color={Colors.dark.textMuted} />
+                    </View>
+                  )}
+                  <View style={fm.offerInfo}>
+                    <Text style={fm.offerTitle} numberOfLines={1}>{offer.title}</Text>
+                    {offer.discount ? <Text style={fm.offerDiscount}>{offer.discount}</Text> : null}
+                    {offer.description ? <Text style={fm.offerDesc} numberOfLines={1}>{offer.description}</Text> : null}
+                  </View>
+                  <TouchableOpacity onPress={() => handleEditOffer(idx)} style={fm.offerEditBtn}>
+                    <Edit3 size={13} color={Colors.dark.neonGreen} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleRemoveOffer(idx)} style={fm.galleryRemove}>
+                    <X size={14} color={Colors.dark.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+
               <View style={fm.addImgSection}>
-                <View style={fm.row}>
-                  <View style={[fm.field, { flex: 1 }]}>
-                    <Text style={fm.label}>Titulo</Text>
-                    <TextInput style={fm.input} value={newImgLabel} onChangeText={setNewImgLabel} placeholder="Ex: Produto A" placeholderTextColor={Colors.dark.textMuted} />
-                  </View>
-                  <View style={[fm.field, { width: 100 }]}>
-                    <Text style={fm.label}>Preco (R$)</Text>
-                    <TextInput style={fm.input} value={newImgPrice} onChangeText={setNewImgPrice} placeholder="0.00" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
-                  </View>
+                <Text style={[fm.label, { marginBottom: 2 }]}>{editingOfferIdx !== null ? 'Editando Promocao' : 'Nova Promocao'}</Text>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Titulo *</Text>
+                  <TextInput style={fm.input} value={offerTitle} onChangeText={setOfferTitle} placeholder="Ex: 20% OFF em toda a loja" placeholderTextColor={Colors.dark.textMuted} testID="offer-title-input" />
                 </View>
-                <TouchableOpacity style={fm.addImgBtn} onPress={pickGalleryImage} activeOpacity={0.8}>
-                  <ImageIcon size={14} color={Colors.dark.neonGreen} />
-                  <Text style={fm.addImgBtnTxt}>Escolher Foto da Galeria</Text>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Desconto</Text>
+                  <TextInput style={fm.input} value={offerDiscount} onChangeText={setOfferDiscount} placeholder="Ex: 20% OFF, R$ 10 desconto" placeholderTextColor={Colors.dark.textMuted} />
+                </View>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Descricao</Text>
+                  <TextInput style={[fm.input, { minHeight: 60, textAlignVertical: 'top' as const }]} value={offerDesc} onChangeText={setOfferDesc} placeholder="Descricao da promocao" placeholderTextColor={Colors.dark.textMuted} multiline />
+                </View>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Imagem da Promocao</Text>
+                  <TouchableOpacity style={fm.offerImgPickBtn} onPress={pickOfferImage} activeOpacity={0.8}>
+                    {offerImageUrl ? (
+                      <Image source={{ uri: offerImageUrl }} style={fm.offerImgPreview} contentFit="cover" />
+                    ) : (
+                      <View style={fm.offerImgPlaceholder}>
+                        <ImageIcon size={20} color={Colors.dark.neonGreen} />
+                        <Text style={fm.offerImgPlaceholderTxt}>Escolher Imagem</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                <View style={fm.offerBtnRow}>
+                  <TouchableOpacity style={fm.offerSaveBtn} onPress={handleAddOffer} activeOpacity={0.8}>
+                    <Save size={14} color="#000" />
+                    <Text style={fm.offerSaveBtnTxt}>{editingOfferIdx !== null ? 'Atualizar' : 'Adicionar'}</Text>
+                  </TouchableOpacity>
+                  {editingOfferIdx !== null && (
+                    <TouchableOpacity style={fm.offerCancelBtn} onPress={resetOfferFields} activeOpacity={0.8}>
+                      <X size={14} color={Colors.dark.textMuted} />
+                      <Text style={fm.offerCancelBtnTxt}>Cancelar</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </>,
+            'Adicione promocoes e ofertas que aparecerao no perfil da loja',
+          )}
+
+          {renderSponsorSection(
+            'gallery',
+            `Galeria de Imagens (${form.galleryImages.length}/10)`,
+            <>
+              {form.galleryImages.map((img) => (
+                <View key={img.id} style={fm.galleryItem}>
+                  <Image source={{ uri: img.url }} style={fm.galleryThumb} contentFit="cover" />
+                  <View style={fm.galleryInfo}>
+                    <Text style={fm.galleryLabel} numberOfLines={1}>{img.label || 'Sem titulo'}</Text>
+                    {img.price !== undefined && <Text style={fm.galleryPrice}>R$ {img.price.toFixed(2)}</Text>}
+                  </View>
+                  <TouchableOpacity onPress={() => handleRemoveGalleryImage(img.id)} style={fm.galleryRemove}>
+                    <X size={14} color={Colors.dark.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {form.galleryImages.length < 10 && (
+                <View style={fm.addImgSection}>
+                  <View style={fm.row}>
+                    <View style={[fm.field, { flex: 1 }]}>
+                      <Text style={fm.label}>Titulo</Text>
+                      <TextInput style={fm.input} value={newImgLabel} onChangeText={setNewImgLabel} placeholder="Ex: Produto A" placeholderTextColor={Colors.dark.textMuted} />
+                    </View>
+                    <View style={[fm.field, { width: 100 }]}>
+                      <Text style={fm.label}>Preco (R$)</Text>
+                      <TextInput style={fm.input} value={newImgPrice} onChangeText={setNewImgPrice} placeholder="0.00" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+                    </View>
+                  </View>
+                  <TouchableOpacity style={fm.addImgBtn} onPress={pickGalleryImage} activeOpacity={0.8}>
+                    <ImageIcon size={14} color={Colors.dark.neonGreen} />
+                    <Text style={fm.addImgBtnTxt}>Escolher Foto da Galeria</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>,
+            'Adicione ate 10 imagens com precos para exibir no perfil',
+          )}
+
+          {renderSponsorSection('address', 'Endereco Completo', (
+            <>
+              <View style={fm.field}>
+                <Text style={fm.label}>Endereco</Text>
+                <TextInput style={fm.input} value={form.address} onChangeText={(v) => updateField('address', v)} placeholder="Rua, numero, bairro" placeholderTextColor={Colors.dark.textMuted} />
+              </View>
+              <View style={fm.row}>
+                <View style={[fm.field, { flex: 1 }]}>
+                  <Text style={fm.label}>Cidade</Text>
+                  <TextInput style={fm.input} value={form.city} onChangeText={(v) => updateField('city', v)} placeholder="Sao Paulo" placeholderTextColor={Colors.dark.textMuted} />
+                </View>
+                <View style={[fm.field, { width: 80 }]}>
+                  <Text style={fm.label}>Estado</Text>
+                  <TextInput style={fm.input} value={form.state} onChangeText={(v) => updateField('state', v)} placeholder="SP" placeholderTextColor={Colors.dark.textMuted} maxLength={2} autoCapitalize="characters" />
+                </View>
+              </View>
+              <View style={fm.field}>
+                <Text style={fm.label}>Telefone</Text>
+                <TextInput style={fm.input} value={formatPhone(form.phone)} onChangeText={(v) => updateField('phone', formatPhone(v))} placeholder="(11) 99999-0000" placeholderTextColor={Colors.dark.textMuted} keyboardType="phone-pad" />
+              </View>
+              <View style={fm.field}>
+                <Text style={fm.label}>Localizacao</Text>
+                <TouchableOpacity style={fm.locationBtn} onPress={getCurrentLocation} activeOpacity={0.7} disabled={loadingLocation}>
+                  <MapPin size={18} color={Colors.dark.neonGreen} />
+                  <Text style={fm.locationBtnText}>{loadingLocation ? 'Obtendo localizacao...' : 'Usar local atual'}</Text>
                 </TouchableOpacity>
+                {form.latitude && form.longitude && form.latitude !== '-23.5505' ? (
+                  <Text style={fm.locationInfo}>Lat: {parseFloat(form.latitude).toFixed(6)}  |  Lng: {parseFloat(form.longitude).toFixed(6)}</Text>
+                ) : null}
               </View>
-            )}
-          </View>
+            </>
+          ))}
 
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Endereco Completo</Text>
-            <View style={fm.field}>
-              <Text style={fm.label}>Endereco</Text>
-              <TextInput style={fm.input} value={form.address} onChangeText={(v) => updateField('address', v)} placeholder="Rua, numero, bairro" placeholderTextColor={Colors.dark.textMuted} />
-            </View>
-            <View style={fm.row}>
-              <View style={[fm.field, { flex: 1 }]}>
-                <Text style={fm.label}>Cidade</Text>
-                <TextInput style={fm.input} value={form.city} onChangeText={(v) => updateField('city', v)} placeholder="Sao Paulo" placeholderTextColor={Colors.dark.textMuted} />
+          {renderSponsorSection('coupon', 'Cupom e Valores', (
+            <>
+              <View style={fm.row}>
+                <View style={[fm.field, { flex: 1 }]}>
+                  <Text style={fm.label}>Valor do Cupom (R$)</Text>
+                  <TextInput style={fm.input} value={form.couponValue} onChangeText={(v) => updateField('couponValue', v)} placeholder="10" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+                </View>
+                <View style={[fm.field, { flex: 1 }]}>
+                  <Text style={fm.label}>Compra Minima (R$)</Text>
+                  <TextInput style={fm.input} value={form.minPurchaseValue} onChangeText={(v) => updateField('minPurchaseValue', v)} placeholder="50" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
+                </View>
               </View>
-              <View style={[fm.field, { width: 80 }]}>
-                <Text style={fm.label}>Estado</Text>
-                <TextInput style={fm.input} value={form.state} onChangeText={(v) => updateField('state', v)} placeholder="SP" placeholderTextColor={Colors.dark.textMuted} maxLength={2} autoCapitalize="characters" />
-              </View>
-            </View>
-            <View style={fm.field}>
-              <Text style={fm.label}>Telefone</Text>
-              <TextInput style={fm.input} value={formatPhone(form.phone)} onChangeText={(v) => updateField('phone', formatPhone(v))} placeholder="(11) 99999-0000" placeholderTextColor={Colors.dark.textMuted} keyboardType="phone-pad" />
-            </View>
-            <View style={fm.field}>
-              <Text style={fm.label}>Localizacao</Text>
-              <TouchableOpacity style={fm.locationBtn} onPress={getCurrentLocation} activeOpacity={0.7} disabled={loadingLocation}>
-                <MapPin size={18} color={Colors.dark.neonGreen} />
-                <Text style={fm.locationBtnText}>{loadingLocation ? 'Obtendo localizacao...' : 'Usar local atual'}</Text>
+              <TouchableOpacity style={fm.toggleRow} onPress={() => updateField('verified', !form.verified)} activeOpacity={0.7}>
+                <BadgeCheck size={18} color={form.verified ? Colors.dark.neonGreen : Colors.dark.textMuted} />
+                <Text style={[fm.toggleLabel, form.verified && fm.toggleActive]}>Patrocinador Verificado</Text>
+                <View style={[fm.toggleSwitch, form.verified && fm.toggleSwitchActive]}>
+                  <View style={[fm.toggleDot, form.verified && fm.toggleDotActive]} />
+                </View>
               </TouchableOpacity>
-              {form.latitude && form.longitude && form.latitude !== '-23.5505' ? (
-                <Text style={fm.locationInfo}>Lat: {parseFloat(form.latitude).toFixed(6)}  |  Lng: {parseFloat(form.longitude).toFixed(6)}</Text>
-              ) : null}
-            </View>
-          </View>
-
-          <View style={fm.section}>
-            <Text style={fm.sectionTitle}>Cupom e Valores</Text>
-            <View style={fm.row}>
-              <View style={[fm.field, { flex: 1 }]}>
-                <Text style={fm.label}>Valor do Cupom (R$)</Text>
-                <TextInput style={fm.input} value={form.couponValue} onChangeText={(v) => updateField('couponValue', v)} placeholder="10" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
-              </View>
-              <View style={[fm.field, { flex: 1 }]}>
-                <Text style={fm.label}>Compra Minima (R$)</Text>
-                <TextInput style={fm.input} value={form.minPurchaseValue} onChangeText={(v) => updateField('minPurchaseValue', v)} placeholder="50" placeholderTextColor={Colors.dark.textMuted} keyboardType="numeric" />
-              </View>
-            </View>
-            <TouchableOpacity style={fm.toggleRow} onPress={() => updateField('verified', !form.verified)} activeOpacity={0.7}>
-              <BadgeCheck size={18} color={form.verified ? Colors.dark.neonGreen : Colors.dark.textMuted} />
-              <Text style={[fm.toggleLabel, form.verified && fm.toggleActive]}>Patrocinador Verificado</Text>
-              <View style={[fm.toggleSwitch, form.verified && fm.toggleSwitchActive]}>
-                <View style={[fm.toggleDot, form.verified && fm.toggleDotActive]} />
-              </View>
-            </TouchableOpacity>
-          </View>
+            </>
+          ))}
 
           <TouchableOpacity style={fm.saveFullBtn} onPress={handleSave} activeOpacity={0.8}>
             <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={fm.saveFullGrad}>
@@ -861,6 +951,8 @@ function SponsorFormModal({
           </TouchableOpacity>
           <View style={{ height: 40 }} />
         </ScrollView>
+
+          <ImageCanvasEditorModal session={imageCanvasSession} onClose={() => setImageCanvasSession(null)} />
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -875,6 +967,9 @@ const fm = StyleSheet.create({
   saveHeaderTxt: { color: '#000', fontSize: 14, fontWeight: '700' as const },
   scroll: { padding: 16 },
   section: { backgroundColor: Colors.dark.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  sectionToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  sectionToggleTitle: { flex: 1, color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
+  sectionBody: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: Colors.dark.cardBorder },
   sectionTitle: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const, marginBottom: 4 },
   sectionSub: { color: Colors.dark.textMuted, fontSize: 11, marginBottom: 14 },
   field: { marginBottom: 12 },
@@ -1808,6 +1903,7 @@ export default function AdminPanel() {
   const [prizeLotteryRef, setPrizeLotteryRef] = useState<string>('');
   const [prizeBgUploadMeta, setPrizeBgUploadMeta] = useState<{ fileName?: string; mimeType?: string } | null>(null);
   const [savingCityPrize, setSavingCityPrize] = useState<boolean>(false);
+  const [imageCanvasSession, setImageCanvasSession] = useState<ImageCanvasEditorSession | null>(null);
 
   const copyAdminImageStorageSql = useCallback(async () => {
     await Clipboard.setStringAsync(getAdminImageStorageSetupSql());
@@ -2053,60 +2149,86 @@ export default function AdminPanel() {
   const handlePickCityPhoto = useCallback(async (city: string) => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
+      allowsEditing: false,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      try {
-        const uploadedImage = await uploadAdminImage({
-          folder: 'city-images',
-          itemId: `${selectedCityState ?? 'city'}-${city}`,
-          fileUri: result.assets[0].uri,
-          fileName: result.assets[0].fileName || undefined,
-          mimeType: result.assets[0].mimeType || undefined,
-        });
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: `Editar foto de ${city}`,
+        description: 'Ajuste a imagem antes de salvar no servidor.',
+        aspectRatio: 16 / 9,
+        confirmLabel: 'SALVAR FOTO DA CIDADE',
+        onConfirm: async (editedAsset) => {
+          try {
+            const uploadedImage = await uploadAdminImage({
+              folder: 'city-images',
+              itemId: `${selectedCityState ?? 'city'}-${city}`,
+              fileUri: editedAsset.uri,
+              fileName: editedAsset.fileName,
+              mimeType: editedAsset.mimeType,
+            });
 
-        await saveCityImage(city, uploadedImage.publicUrl, selectedCityState ?? undefined);
-        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        console.log('[Admin] City photo saved for:', city, uploadedImage.publicUrl);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel salvar a foto da cidade';
+            await saveCityImage(city, uploadedImage.publicUrl, selectedCityState ?? undefined);
+            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            console.log('[Admin] City photo saved for:', city, uploadedImage.publicUrl);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel salvar a foto da cidade';
 
-        if (isAdminImageBucketMissingError(error) || isAdminImageStoragePolicyError(error)) {
-          showAdminImageStorageSetupAlert(errorMessage);
-        } else {
-          Alert.alert('Falha no upload', errorMessage);
-        }
-      }
+            if (isAdminImageBucketMissingError(error) || isAdminImageStoragePolicyError(error)) {
+              showAdminImageStorageSetupAlert(errorMessage);
+            } else {
+              Alert.alert('Falha no upload', errorMessage);
+            }
+
+            throw error;
+          }
+        },
+      });
     }
   }, [saveCityImage, selectedCityState, showAdminImageStorageSetupAlert]);
 
   const handlePickNewCityPhoto = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
+      allowsEditing: false,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      setNewCityPhotoUri(result.assets[0].uri);
-      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: 'Editar foto da nova cidade',
+        description: 'Ajuste a capa da cidade antes de salvar.',
+        aspectRatio: 16 / 9,
+        confirmLabel: 'USAR ESTA FOTO',
+        onConfirm: async (editedAsset) => {
+          setNewCityPhotoUri(editedAsset.uri);
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        },
+      });
     }
   }, []);
 
   const handlePickPrizeBg = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
+      allowsEditing: false,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      setPrizeBgUrl(result.assets[0].uri);
-      setPrizeBgUploadMeta({
-        fileName: result.assets[0].fileName ?? undefined,
-        mimeType: result.assets[0].mimeType ?? undefined,
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: 'Editar fundo do premio',
+        description: 'Ajuste a imagem que sera usada como fundo do premio da cidade.',
+        aspectRatio: 16 / 9,
+        confirmLabel: 'USAR NO PREMIO',
+        onConfirm: async (editedAsset) => {
+          setPrizeBgUrl(editedAsset.uri);
+          setPrizeBgUploadMeta({
+            fileName: editedAsset.fileName,
+            mimeType: editedAsset.mimeType,
+          });
+        },
       });
     }
   }, []);
@@ -3572,6 +3694,8 @@ export default function AdminPanel() {
           )}
         </KeyboardAvoidingView>
       </Modal>
+
+      <ImageCanvasEditorModal session={imageCanvasSession} onClose={() => setImageCanvasSession(null)} />
 
       <Modal visible={showAddCityModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => {
         setShowAddCityModal(false);

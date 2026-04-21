@@ -9,7 +9,6 @@ import { GrandPrize } from '@/types';
 const { width, height } = Dimensions.get('window');
 
 interface WelcomeSplashProps {
-  userName: string;
   userCity?: string;
   grandPrizeConfig?: GrandPrize | null;
   cityImage?: string | null;
@@ -66,15 +65,13 @@ const ct = StyleSheet.create({
   lbl: { color: 'rgba(255,255,255,0.85)', fontSize: 9, fontWeight: '700' as const, marginTop: 3, letterSpacing: 1.5 },
 });
 
-export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, cityImage, onContinue }: WelcomeSplashProps) {
+export default function WelcomeSplash({ userCity, grandPrizeConfig, cityImage, onContinue }: WelcomeSplashProps) {
   const logoScale = useRef(new Animated.Value(0)).current;
   const logoRotate = useRef(new Animated.Value(0)).current;
   const titleOp = useRef(new Animated.Value(0)).current;
   const titleY = useRef(new Animated.Value(30)).current;
   const msgOp = useRef(new Animated.Value(0)).current;
   const msgY = useRef(new Animated.Value(20)).current;
-  const btnOp = useRef(new Animated.Value(0)).current;
-  const btnY = useRef(new Animated.Value(20)).current;
   const pulse = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.3)).current;
   const glowScale = useRef(new Animated.Value(1)).current;
@@ -93,10 +90,6 @@ export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, ci
       Animated.parallel([
         Animated.timing(msgOp, { toValue: 1, duration: 500, useNativeDriver: true }),
         Animated.timing(msgY, { toValue: 0, duration: 500, useNativeDriver: true }),
-      ]),
-      Animated.parallel([
-        Animated.timing(btnOp, { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.timing(btnY, { toValue: 0, duration: 400, useNativeDriver: true }),
       ]),
     ]).start();
 
@@ -126,9 +119,13 @@ export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, ci
   }, []);
 
   const spin = logoRotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const prize = grandPrizeConfig ?? null;
+  const prizeBgUrl = prize?.backgroundImageUrl || prize?.imageUrl || cityImage || null;
+  const hasPrizePhoto = !!prizeBgUrl;
+  const drawDate = prize?.drawDate ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   return (
-    <View style={styles.container}>
+    <TouchableOpacity style={styles.container} activeOpacity={1} onPress={onContinue}>
       <LinearGradient
         colors={['#FFFFFF', '#FFF7ED', '#FFFFFF']}
         style={styles.bg}
@@ -165,7 +162,6 @@ export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, ci
         </Animated.View>
 
         <Animated.View style={{ opacity: titleOp, transform: [{ translateY: titleY }] }}>
-          <Text style={styles.greeting}>Ola, <Text style={styles.name}>{userName.split(' ')[0]}!</Text></Text>
           <Text style={styles.brand}>
             Bem-vindo ao <Text style={styles.brandAccent}>Caca ao Tesouro PIX</Text>
           </Text>
@@ -177,61 +173,46 @@ export default function WelcomeSplash({ userName, userCity, grandPrizeConfig, ci
           ) : null}
         </Animated.View>
 
-        <Animated.View style={[styles.prizeBox, { opacity: msgOp, transform: [{ translateY: msgY }] }]}>
-          {(() => {
-            const prize = grandPrizeConfig ?? null;
-            const bgUrl = prize?.backgroundImageUrl || prize?.imageUrl || cityImage || null;
-            const hasCityPhoto = !!bgUrl;
-            const drawDate = prize?.drawDate ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-            if (!hasCityPhoto) {
-              return (
-                <View style={styles.prizeBgWrap}>
-                  <LinearGradient
-                    colors={['#FFF7ED', '#FFF1E6']}
-                    style={styles.prizeGrad}
-                  >
-                    <View style={styles.prizeHeader}>
-                      <Gift size={22} color="#F97316" />
-                      <Text style={styles.prizeTtl}>GRANDE PREMIO</Text>
-                    </View>
-                    <Text style={styles.comingSoon}>Premio em Breve</Text>
-                    <Text style={styles.comingSoonSub}>Fique atento! O premio da sua cidade sera divulgado em breve.</Text>
-                  </LinearGradient>
+        <Animated.View style={[styles.prizeBox, hasPrizePhoto ? styles.prizeBoxPhoto : null, hasPrizePhoto ? styles.prizeBoxWithTimer : null, { opacity: msgOp, transform: [{ translateY: msgY }] }]}>
+          {!hasPrizePhoto ? (
+            <View style={styles.prizeBgWrap}>
+              <LinearGradient
+                colors={['#FFF7ED', '#FFF1E6']}
+                style={styles.prizeGrad}
+              >
+                <View style={styles.prizeHeader}>
+                  <Gift size={22} color="#F97316" />
+                  <Text style={styles.prizeTtl}>GRANDE PREMIO</Text>
                 </View>
-              );
-            }
+                <Text style={styles.comingSoon}>Premio em Breve</Text>
+                <Text style={styles.comingSoonSub}>Fique atento! O premio da sua cidade sera divulgado em breve.</Text>
+              </LinearGradient>
+            </View>
+          ) : (
+            <View style={styles.prizeBgWrap}>
+              <Image source={{ uri: prizeBgUrl }} style={styles.prizeBgImgTall} contentFit="cover" contentPosition="center" cachePolicy="memory-disk" />
+            </View>
+          )}
+        </Animated.View>
 
-            return (
-              <View style={styles.prizeBgWrap}>
-                <Image source={{ uri: bgUrl }} style={styles.prizeBgImgTall} contentFit="cover" contentPosition="center" cachePolicy="memory-disk" />
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.9)']}
-                  locations={[0, 0.5, 1]}
-                  style={styles.prizeGradOverlay}
-                >
-                  <View style={styles.timerHighlight}>
-                    <View style={styles.timerHighlightHeader}>
-                      <Clock size={16} color={'#FFFFFF'} />
-                      <Text style={styles.timerHighlightLabel}>Sorteio em:</Text>
-                    </View>
-                    <CountdownTimer targetDate={drawDate} />
-                  </View>
-                </LinearGradient>
+        {hasPrizePhoto ? (
+          <Animated.View style={[styles.timerBelowWrap, { opacity: msgOp, transform: [{ translateY: msgY }] }]}>
+            <LinearGradient
+              colors={['#FB923C', '#EA580C']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.timerHighlight, styles.timerHighlightBelow]}
+            >
+              <View style={styles.timerHighlightHeader}>
+                <Clock size={16} color={'#FFFFFF'} />
+                <Text style={styles.timerHighlightLabel}>Sorteio em:</Text>
               </View>
-            );
-          })()}
-        </Animated.View>
-
-        <Animated.View style={{ opacity: btnOp, transform: [{ translateY: btnY }, { scale: pulse }] }}>
-          <TouchableOpacity style={styles.btn} onPress={onContinue} activeOpacity={0.85} testID="welcome-btn">
-            <LinearGradient colors={['#F97316', '#EA580C']} style={styles.btnGrad}>
-              <Text style={styles.btnTxt}>EXPLORAR</Text>
+              <CountdownTimer targetDate={drawDate} />
             </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
+          </Animated.View>
+        ) : null}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -267,7 +248,8 @@ const styles = StyleSheet.create({
   },
   content: {
     alignItems: 'center',
-    paddingHorizontal: 32,
+    width: '100%',
+    paddingHorizontal: 16,
   },
   logoWrap: {
     marginBottom: 32,
@@ -298,21 +280,10 @@ const styles = StyleSheet.create({
     top: -10,
     left: -10,
   },
-  greeting: {
-    fontSize: 30,
-    fontWeight: '300' as const,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  name: {
-    fontWeight: '800' as const,
-    color: '#1A1A2E',
-  },
   brand: {
     fontSize: 17,
     color: '#6B7280',
     textAlign: 'center',
-    marginTop: 6,
     lineHeight: 24,
   },
   brandAccent: {
@@ -336,17 +307,29 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginTop: 28,
     marginBottom: 36,
-    borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.2)',
+    borderWidth: 3,
+    borderColor: '#FB923C',
     shadowColor: '#F97316',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 3,
     width: '100%',
+    aspectRatio: 1,
+  },
+  prizeBoxPhoto: {
+    borderWidth: 4,
+    borderColor: '#FACC15',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  prizeBoxWithTimer: {
+    marginBottom: 16,
   },
   prizeBgWrap: {
     position: 'relative' as const,
+    flex: 1,
   },
   prizeBgImg: {
     position: 'absolute' as const,
@@ -367,14 +350,14 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   prizeGrad: {
+    flex: 1,
     padding: 20,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  prizeGradOverlay: {
-    paddingTop: 120,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    alignItems: 'center',
+  timerBelowWrap: {
+    width: '100%',
+    marginBottom: 36,
   },
   prizeHeaderNew: {
     flexDirection: 'row',
@@ -406,6 +389,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 8,
+  },
+  timerHighlightBelow: {
+    backgroundColor: 'transparent',
+    marginTop: 0,
   },
   timerHighlightHeader: {
     flexDirection: 'row',
@@ -535,26 +522,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     paddingHorizontal: 8,
-  },
-  btn: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    minWidth: 220,
-    shadowColor: '#F97316',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  btnGrad: {
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    alignItems: 'center',
-  },
-  btnTxt: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '800' as const,
-    letterSpacing: 1.5,
   },
 });

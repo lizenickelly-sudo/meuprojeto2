@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
+import ImageCanvasEditorModal, { mapPickerAssetToImageCanvasAsset, type ImageCanvasEditorSession } from '@/components/ImageCanvasEditorModal';
 import { formatCPF, formatPhone } from '@/lib/formatters';
 import { hasPendingUserVerification, isUserVerificationApproved } from '@/lib/userVerification';
 import { useUser } from '@/providers/UserProvider';
@@ -108,6 +109,7 @@ export default function ProfileScreen() {
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
   const [pinCode, setPinCode] = useState<string>('');
   const [pinError, setPinError] = useState<boolean>(false);
+  const [imageCanvasSession, setImageCanvasSession] = useState<ImageCanvasEditorSession | null>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const [cpfLookupLoading, setCpfLookupLoading] = useState<boolean>(false);
   const [cpfLookupHint, setCpfLookupHint] = useState<string>('');
@@ -182,12 +184,20 @@ export default function ProfileScreen() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') { Alert.alert('Permissão necessária', 'Precisamos de acesso à galeria.'); return; }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7 });
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7 });
       if (!result.canceled && result.assets[0]) {
-        const uri = result.assets[0].uri;
-        if (ed) setF((prev) => ({ ...prev, avatarUrl: uri }));
-        else saveProfile({ ...profile, avatarUrl: uri });
-        if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setImageCanvasSession({
+          asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+          title: 'Editar foto de perfil',
+          description: 'Ajuste o enquadramento antes de salvar o avatar.',
+          aspectRatio: 1,
+          confirmLabel: 'USAR ESTA FOTO',
+          onConfirm: async (editedAsset) => {
+            if (ed) setF((prev) => ({ ...prev, avatarUrl: editedAsset.uri }));
+            else saveProfile({ ...profile, avatarUrl: editedAsset.uri });
+            if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          },
+        });
       }
     } catch (err) { console.log('[Profile] Avatar pick error:', err); }
   }, [ed, profile, saveProfile]);
@@ -413,6 +423,8 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ImageCanvasEditorModal session={imageCanvasSession} onClose={() => setImageCanvasSession(null)} />
 
       <Modal visible={showCityModal} transparent animationType="slide" onRequestClose={() => setShowCityModal(false)}>
         <View style={cm.overlay}>
