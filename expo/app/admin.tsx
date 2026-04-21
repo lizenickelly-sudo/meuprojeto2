@@ -59,7 +59,15 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import Colors from '@/constants/colors';
-import { formatVideoDuration, uploadSponsorPromotionalVideo } from '@/lib/sponsorMedia';
+import {
+  formatVideoDuration,
+  getSponsorVideoBucketName,
+  getSponsorVideoStorageSetupInstructions,
+  getSponsorVideoStorageSetupSql,
+  isSponsorVideoBucketMissingError,
+  isSponsorVideoStoragePolicyError,
+  uploadSponsorPromotionalVideo,
+} from '@/lib/sponsorMedia';
 import { CITIES_BY_STATE, STATES } from '@/mocks/cities';
 import { useAdmin } from '@/providers/AdminProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
@@ -213,6 +221,33 @@ function SponsorFormModal({
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  const copySponsorVideoStorageSql = useCallback(async () => {
+    await Clipboard.setStringAsync(getSponsorVideoStorageSetupSql());
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    Alert.alert(
+      'SQL copiado',
+      `Cole o SQL no SQL Editor do Supabase para criar o bucket \"${getSponsorVideoBucketName()}\" e liberar os uploads.`,
+    );
+  }, []);
+
+  const showSponsorVideoStorageSetupAlert = useCallback((message?: string) => {
+    Alert.alert(
+      'Storage de videos nao configurado',
+      `${message || getSponsorVideoStorageSetupInstructions()}\n\nUse \"Copiar SQL do Storage\" e execute o script uma vez no SQL Editor do Supabase.`,
+      [
+        { text: 'Agora nao', style: 'cancel' },
+        {
+          text: 'Copiar SQL',
+          onPress: () => {
+            void copySponsorVideoStorageSql();
+          },
+        },
+      ],
+    );
+  }, [copySponsorVideoStorageSql]);
+
   const getCurrentLocation = useCallback(async () => {
     try {
       setLoadingLocation(true);
@@ -335,11 +370,17 @@ function SponsorFormModal({
       setNewVideoTitle('');
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('Falha no upload', error instanceof Error ? error.message : 'Nao foi possivel enviar o video para o Supabase');
+      const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel enviar o video para o Supabase';
+
+      if (isSponsorVideoBucketMissingError(error) || isSponsorVideoStoragePolicyError(error)) {
+        showSponsorVideoStorageSetupAlert(errorMessage);
+      } else {
+        Alert.alert('Falha no upload', errorMessage);
+      }
     } finally {
       setUploadingVideo(false);
     }
-  }, [form.name, form.promotionalVideos, newVideoTitle, sponsorId, updateField, uploadingVideo]);
+  }, [form.name, form.promotionalVideos, newVideoTitle, showSponsorVideoStorageSetupAlert, sponsorId, updateField, uploadingVideo]);
 
   const handleSave = useCallback(() => {
     if (uploadingVideo) {
@@ -552,7 +593,19 @@ function SponsorFormModal({
                     {uploadingVideo ? 'Enviando video...' : 'Escolher e enviar video'}
                   </Text>
                 </TouchableOpacity>
-                <Text style={fm.videoHint}>Bucket esperado no Supabase Storage: sponsor-videos (ou EXPO_PUBLIC_SUPABASE_SPONSOR_VIDEO_BUCKET)</Text>
+                <TouchableOpacity
+                  style={fm.videoSetupBtn}
+                  onPress={() => {
+                    void copySponsorVideoStorageSql();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Copy size={14} color={Colors.dark.neonGreen} />
+                  <Text style={fm.videoSetupBtnTxt}>Copiar SQL do Storage</Text>
+                </TouchableOpacity>
+                <Text style={fm.videoHint}>
+                  Bucket atual: {getSponsorVideoBucketName()}. Se o upload falhar, execute esse SQL no Supabase para criar o bucket e liberar leitura/upload para o app.
+                </Text>
               </View>
             )}
           </View>
@@ -772,6 +825,8 @@ const fm = StyleSheet.create({
   addVideoBtnDisabled: { opacity: 0.7 },
   addVideoBtnTxt: { color: '#000', fontSize: 13, fontWeight: '700' as const },
   addVideoBtnTxtDisabled: { color: '#000' },
+  videoSetupBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.dark.surfaceLight, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Colors.dark.neonGreenFaint, marginTop: 10 },
+  videoSetupBtnTxt: { color: Colors.dark.neonGreen, fontSize: 12, fontWeight: '700' as const },
   videoHint: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 8, lineHeight: 16 },
   offerItem: { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: Colors.dark.surfaceLight, borderRadius: 10, padding: 8, marginBottom: 8, gap: 10 },
   offerThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: Colors.dark.inputBg },

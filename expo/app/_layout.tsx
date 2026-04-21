@@ -45,6 +45,7 @@ function RootLayoutNav() {
         options={{ title: "Painel Admin", presentation: "modal" }}
       />
       <Stack.Screen name="leaderboard" options={{ title: "Ranking Semanal" }} />
+      <Stack.Screen name="reels" options={{ headerShown: false }} />
       <Stack.Screen
         name="sponsor-detail"
         options={{ title: "Patrocinador" }}

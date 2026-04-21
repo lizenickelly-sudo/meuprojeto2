@@ -9,8 +9,6 @@ import { readDomainCache, writeDomainCache, invalidateDomainKey } from '@/lib/st
 import {
   saveAppState as dbSaveAppState,
   fetchSponsors as dbFetchSponsors,
-  upsertSponsor as dbUpsertSponsor,
-  removeSponsor as dbRemoveSponsor,
 } from '@/services/database';
 
 const STORAGE_KEYS = {
@@ -228,7 +226,7 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     },
     onSuccess: (data) => {
       setSponsors(data);
-      queryClient.invalidateQueries({ queryKey: ['sponsors'] });
+      queryClient.setQueryData(['sponsors'], data);
     },
   });
 
@@ -324,25 +322,20 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   const addSponsor = useCallback((sponsor: Sponsor) => {
     const updated = [...sponsors, sponsor];
     saveSponsorsMutation.mutate(updated);
-    dbUpsertSponsor(sponsor).then((ok) => {
-      if (ok) console.log('[SponsorProvider] Sponsor synced to Supabase:', sponsor.name);
-    });
   }, [sponsors, saveSponsorsMutation]);
 
   const updateSponsor = useCallback((sponsor: Sponsor) => {
-    const updated = sponsors.map((s) => (s.id === sponsor.id ? sponsor : s));
+    const exists = sponsors.some((item) => item.id === sponsor.id);
+    const updated = exists
+      ? sponsors.map((item) => (item.id === sponsor.id ? sponsor : item))
+      : [...sponsors, sponsor];
+
     saveSponsorsMutation.mutate(updated);
-    dbUpsertSponsor(sponsor).then((ok) => {
-      if (ok) console.log('[SponsorProvider] Sponsor updated in Supabase:', sponsor.name);
-    });
   }, [sponsors, saveSponsorsMutation]);
 
   const deleteSponsor = useCallback((sponsorId: string) => {
     const updated = sponsors.filter((s) => s.id !== sponsorId);
     saveSponsorsMutation.mutate(updated);
-    dbRemoveSponsor(sponsorId).then((ok) => {
-      if (ok) console.log('[SponsorProvider] Sponsor removed from Supabase:', sponsorId);
-    });
   }, [sponsors, saveSponsorsMutation]);
 
   const toggleLikeOffer = useCallback((offerId: string, onPoints?: (pts: number) => void): boolean => {

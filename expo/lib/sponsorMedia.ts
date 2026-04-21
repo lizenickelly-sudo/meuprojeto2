@@ -2,6 +2,10 @@ import { hasSupabaseConfig, supabase } from '@/lib/supabase';
 import type { SponsorVideo } from '@/types';
 
 const SUPABASE_SPONSOR_VIDEO_BUCKET = (process.env.EXPO_PUBLIC_SUPABASE_SPONSOR_VIDEO_BUCKET || 'sponsor-videos').trim();
+const MAX_PROMOTIONAL_VIDEO_BYTES = 50 * 1024 * 1024;
+const STORAGE_READ_POLICY_NAME = 'Public can read sponsor videos';
+const STORAGE_INSERT_POLICY_NAME = 'App can upload sponsor videos';
+const STORAGE_POLICY_ROLES_SQL = 'anon, authenticated';
 
 const MIME_EXTENSION_MAP: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -10,6 +14,20 @@ const MIME_EXTENSION_MAP: Record<string, string> = {
   'video/x-m4v': 'm4v',
   'video/3gpp': '3gp',
 };
+
+const SUPPORTED_VIDEO_MIME_TYPES = Object.keys(MIME_EXTENSION_MAP);
+
+function escapeSqlLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return typeof error === 'string' ? error : '';
+}
 
 function sanitizePathSegment(value: string): string {
   const sanitized = value
@@ -81,6 +99,49 @@ export function getSponsorVideoBucketName(): string {
   return SUPABASE_SPONSOR_VIDEO_BUCKET;
 }
 
+export function getSponsorVideoStorageSetupInstructions(): string {
+  return `Crie o bucket publico "${SUPABASE_SPONSOR_VIDEO_BUCKET}" no Supabase Storage e libere upload/leitura para os papeis anon e authenticated.`;
+}
+
+export function getSponsorVideoStorageSetupSql(): string {
+  const bucketName = escapeSqlLiteral(SUPABASE_SPONSOR_VIDEO_BUCKET);
+  const allowedMimeTypes = SUPPORTED_VIDEO_MIME_TYPES
+    .map((mimeType) => `'${escapeSqlLiteral(mimeType)}'`)
+    .join(', ');
+
+  return `insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('${bucketName}', '${bucketName}', true, ${MAX_PROMOTIONAL_VIDEO_BYTES}, array[${allowedMimeTypes}])
+on conflict (id) do update
+set name = excluded.name,
+    public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "${STORAGE_READ_POLICY_NAME}" on storage.objects;
+create policy "${STORAGE_READ_POLICY_NAME}"
+  on storage.objects
+  for select
+  to ${STORAGE_POLICY_ROLES_SQL}
+  using (bucket_id = '${bucketName}');
+
+drop policy if exists "${STORAGE_INSERT_POLICY_NAME}" on storage.objects;
+create policy "${STORAGE_INSERT_POLICY_NAME}"
+  on storage.objects
+  for insert
+  to ${STORAGE_POLICY_ROLES_SQL}
+  with check (bucket_id = '${bucketName}');`;
+}
+
+export function isSponsorVideoBucketMissingError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return /bucket\s+not\s+found/.test(message) || /bucket.*does not exist/.test(message);
+}
+
+export function isSponsorVideoStoragePolicyError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return /row-level security|violates row-level security policy|permission|not allowed|unauthorized/.test(message);
+}
+
 export function formatVideoDuration(durationSeconds?: number): string {
   if (!durationSeconds || durationSeconds <= 0) {
     return 'Duracao indisponivel';
@@ -127,9 +188,14 @@ export async function uploadSponsorPromotionalVideo({
   });
 
   if (error) {
-    if (/bucket/i.test(error.message)) {
-      throw new Error(`Crie o bucket publico \"${SUPABASE_SPONSOR_VIDEO_BUCKET}\" no Supabase Storage para salvar videos`);
+    if (isSponsorVideoBucketMissingError(error)) {
+      throw new Error(getSponsorVideoStorageSetupInstructions());
     }
+
+    if (isSponsorVideoStoragePolicyError(error)) {
+      throw new Error(`O bucket \"${SUPABASE_SPONSOR_VIDEO_BUCKET}\" existe, mas o app ainda nao tem permissao para enviar videos. Execute o SQL de setup do Storage no Supabase.`);
+    }
+
     throw new Error(error.message || 'Falha ao enviar video para o Supabase');
   }
 

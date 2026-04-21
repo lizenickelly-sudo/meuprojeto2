@@ -11,7 +11,7 @@ import {
   saveAppState as dbSaveAppState,
   seedAllToSupabase,
   checkTablesExist,
-  SETUP_SQL,
+  getSetupSql,
   fetchAllUsers as dbFetchAllUsers,
 } from '@/services/database';
 import type { SeedResult } from '@/services/database';
@@ -497,7 +497,7 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   }, []);
 
   const getSetupSQL = useCallback(() => {
-    return SETUP_SQL;
+    return getSetupSql();
   }, []);
 
   const verifyIdentity = useCallback((userId: string, email: string, verified: boolean = true) => {

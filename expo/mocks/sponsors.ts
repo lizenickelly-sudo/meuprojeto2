@@ -1,5 +1,85 @@
 import { Sponsor } from '@/types';
 
+const promotionalVideosBySponsor: Record<string, NonNullable<Sponsor['promotionalVideos']>> = {
+  s1: [
+    {
+      id: 'pv_s1_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+      title: 'Ofertas fresquinhas do mercado',
+      fileName: 'mercado-ofertas.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 15,
+      createdAt: '2026-04-20T09:00:00.000Z',
+    },
+  ],
+  s3: [
+    {
+      id: 'pv_s3_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      title: 'Prato do dia saindo da cozinha',
+      fileName: 'restaurante-prato-do-dia.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 16,
+      createdAt: '2026-04-20T10:00:00.000Z',
+    },
+  ],
+  s5: [
+    {
+      id: 'pv_s5_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+      title: 'Banho e tosa com clima de reels',
+      fileName: 'petshop-banho-tosa.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 15,
+      createdAt: '2026-04-20T11:00:00.000Z',
+    },
+  ],
+  s6: [
+    {
+      id: 'pv_s6_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      title: 'Padaria abrindo com fornada quente',
+      fileName: 'padaria-fornada.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 15,
+      createdAt: '2026-04-20T12:00:00.000Z',
+    },
+  ],
+  s7: [
+    {
+      id: 'pv_s7_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      title: 'Cortes especiais em destaque',
+      fileName: 'acougue-cortes-especiais.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 15,
+      createdAt: '2026-04-20T13:00:00.000Z',
+    },
+  ],
+  s9: [
+    {
+      id: 'pv_s9_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      title: 'Rodizio servido na mesa',
+      fileName: 'churrascaria-rodizio.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 20,
+      createdAt: '2026-04-20T14:00:00.000Z',
+    },
+  ],
+  s10: [
+    {
+      id: 'pv_s10_1',
+      url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+      title: 'Livros em destaque da semana',
+      fileName: 'livraria-destaques.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 15,
+      createdAt: '2026-04-20T15:00:00.000Z',
+    },
+  ],
+};
+
 export const mockSponsors: Sponsor[] = [
   {
     id: 's1',
@@ -17,6 +97,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 50,
     verified: true,
     couponValue: 15,
+    promotionalVideos: promotionalVideosBySponsor.s1,
     stories: [
       { id: 'st1', sponsorId: 's1', sponsorName: 'Supermercado Bom Preço', sponsorLogo: 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=100', imageUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400', title: 'Ofertas do dia!', expiresAt: '2026-04-08T23:59:59Z' },
       { id: 'st2', sponsorId: 's1', sponsorName: 'Supermercado Bom Preço', sponsorLogo: 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=100', imageUrl: 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=400', title: 'Bebidas em promoção', expiresAt: '2026-04-08T23:59:59Z' },
@@ -98,6 +179,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 40,
     verified: true,
     couponValue: 20,
+    promotionalVideos: promotionalVideosBySponsor.s3,
     stories: [
       { id: 'st4', sponsorId: 's3', sponsorName: 'Restaurante Sabor Caseiro', sponsorLogo: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=100', imageUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400', title: 'Prato do dia R$19,90', expiresAt: '2026-04-08T23:59:59Z' },
     ],
@@ -175,6 +257,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 60,
     verified: true,
     couponValue: 12,
+    promotionalVideos: promotionalVideosBySponsor.s5,
     stories: [
       { id: 'st5', sponsorId: 's5', sponsorName: 'Pet Shop Amigo Fiel', sponsorLogo: 'https://images.unsplash.com/photo-1601758228041-f3b2795255f1?w=100', imageUrl: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', title: 'Banho + Tosa R$49,90', expiresAt: '2026-04-08T23:59:59Z' },
     ],
@@ -209,6 +292,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 20,
     verified: true,
     couponValue: 8,
+    promotionalVideos: promotionalVideosBySponsor.s6,
     offers: [
       {
         id: 'o8',
@@ -240,6 +324,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 80,
     verified: true,
     couponValue: 18,
+    promotionalVideos: promotionalVideosBySponsor.s7,
     offers: [
       {
         id: 'o9',
@@ -302,6 +387,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 70,
     verified: true,
     couponValue: 22,
+    promotionalVideos: promotionalVideosBySponsor.s9,
     offers: [
       {
         id: 'o11',
@@ -333,6 +419,7 @@ export const mockSponsors: Sponsor[] = [
     minPurchaseValue: 40,
     verified: true,
     couponValue: 10,
+    promotionalVideos: promotionalVideosBySponsor.s10,
     offers: [
       {
         id: 'o12',

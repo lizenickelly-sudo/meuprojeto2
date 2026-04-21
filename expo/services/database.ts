@@ -2,6 +2,7 @@ import { mockSponsors } from '@/mocks/sponsors';
 import { mockWinners, mockGrandPrize } from '@/mocks/winners';
 import { mockLeaderboard } from '@/mocks/leaderboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSponsorVideoStorageSetupSql } from '@/lib/sponsorMedia';
 import type { Sponsor, Winner, GrandPrize, UserProfile } from '@/types';
 import type { LeaderboardEntry } from '@/mocks/leaderboard';
 
@@ -57,6 +58,22 @@ function normalizeEmail(value: string): string {
 
 function normalizeCpf(value: string): string {
   return value.replace(/\D/g, '');
+}
+
+function mergeSponsorVideoFallbacks(sponsors: Sponsor[]): Sponsor[] {
+  const mockSponsorsById = new Map(mockSponsors.map((sponsor) => [sponsor.id, sponsor]));
+
+  return sponsors.map((sponsor) => {
+    const mockSponsor = mockSponsorsById.get(sponsor.id);
+    if (!mockSponsor?.promotionalVideos?.length || sponsor.promotionalVideos?.length) {
+      return sponsor;
+    }
+
+    return {
+      ...sponsor,
+      promotionalVideos: mockSponsor.promotionalVideos,
+    };
+  });
 }
 
 function mapRemoteRowToUserProfile(row: RemoteUserRow): UserProfile {
@@ -245,14 +262,19 @@ async function saveUsersMap(map: Record<string, PersistedUserRow>): Promise<void
 }
 
 export async function fetchSponsors(): Promise<Sponsor[]> {
+  if (!hasSupabaseConfig()) {
+    console.log('[DB] Using local mock sponsors');
+    return mergeSponsorVideoFallbacks(mockSponsors);
+  }
+
   const remoteSponsors = await fetchRemoteAppState<Sponsor[]>('sponsors');
   if (remoteSponsors && remoteSponsors.length > 0) {
     console.log('[DB] Using remote sponsors from Supabase app_state');
-    return remoteSponsors;
+    return mergeSponsorVideoFallbacks(remoteSponsors);
   }
 
-  console.log('[DB] Using local mock sponsors');
-  return mockSponsors;
+  console.log('[DB] No remote sponsors found in Supabase app_state');
+  return [];
 }
 
 export async function upsertSponsor(sponsor: Sponsor): Promise<boolean> {
@@ -440,7 +462,7 @@ export function hasConfigError(error?: string): boolean {
   return /configur|apikey|EXPO_PUBLIC_SUPABASE/i.test(error);
 }
 
-export const SETUP_SQL = `
+const BASE_SETUP_SQL = `
 create table if not exists public.users (
   email text primary key,
   cpf text,
@@ -470,3 +492,7 @@ create table if not exists public.app_state (
 
 create index if not exists app_state_updated_at_idx on public.app_state (updated_at desc);
 `;
+
+export function getSetupSql(): string {
+  return [BASE_SETUP_SQL.trim(), getSponsorVideoStorageSetupSql().trim()].join('\n\n');
+}

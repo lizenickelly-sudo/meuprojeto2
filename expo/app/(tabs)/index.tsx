@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   Animated,
-  Dimensions,
   Platform,
   RefreshControl,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
@@ -21,6 +19,7 @@ import {
   DollarSign,
   Heart,
   Star,
+  PlayCircle,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
@@ -33,64 +32,12 @@ import SponsorStories from '@/components/SponsorStories';
 import PromotionalFeed from '@/components/PromotionalFeed';
 import WelcomeSplash from '@/components/WelcomeSplash';
 import type { Sponsor } from "@/types";
-import { useMemo } from 'react';
 
 console.log("[HomeScreen] Mounting home screen");
-const { width: SCREEN_W } = Dimensions.get('window');
-
-function CountdownTimer({ targetDate }: { targetDate: string }) {
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, mins: 0, secs: 0 });
-
-  useEffect(() => {
-    const update = () => {
-      const diff = new Date(targetDate).getTime() - Date.now();
-      if (diff <= 0) {
-        setTimeLeft({ days: 0, hours: 0, mins: 0, secs: 0 });
-        return;
-      }
-      setTimeLeft({
-        days: Math.floor(diff / 86400000),
-        hours: Math.floor((diff % 86400000) / 3600000),
-        mins: Math.floor((diff % 3600000) / 60000),
-        secs: Math.floor((diff % 60000) / 1000),
-      });
-    };
-    update();
-    const iv = setInterval(update, 1000);
-    return () => clearInterval(iv);
-  }, [targetDate]);
-
-  return (
-    <View style={cd.row}>
-      {[
-        { v: timeLeft.days, l: 'DIAS' },
-        { v: timeLeft.hours, l: 'HRS' },
-        { v: timeLeft.mins, l: 'MIN' },
-        { v: timeLeft.secs, l: 'SEG' },
-      ].map((item, i) => (
-        <React.Fragment key={item.l}>
-          {i > 0 && <Text style={cd.sep}>:</Text>}
-          <View style={cd.box}>
-            <Text style={cd.val}>{String(item.v).padStart(2, '0')}</Text>
-            <Text style={cd.lbl}>{item.l}</Text>
-          </View>
-        </React.Fragment>
-      ))}
-    </View>
-  );
-}
-
-const cd = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  sep: { color: Colors.dark.primary, fontSize: 20, fontWeight: '800' as const, marginBottom: 12 },
-  box: { alignItems: 'center', backgroundColor: Colors.dark.primaryFaint, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 48, borderWidth: 1, borderColor: Colors.dark.primaryBorder },
-  val: { color: Colors.dark.primary, fontSize: 22, fontWeight: '900' as const },
-  lbl: { color: Colors.dark.textMuted, fontSize: 8, fontWeight: '700' as const, marginTop: 2, letterSpacing: 1 },
-});
 
 function WinnerTicker() {
   const scrollX = useRef(new Animated.Value(0)).current;
-  const [winners, setWinners] = useState<Array<{ id: string; name: string; city: string; amount: number }>>([]);
+  const [winners, setWinners] = useState<{ id: string; name: string; city: string; amount: number }[]>([]);
 
   useEffect(() => {
     fetchWinners().then((data) => {
@@ -360,7 +307,11 @@ export default function HomeScreen() {
   const { grandPrizeConfig, getCityPrize, getCityImage } = useAdmin();
   const { userEmail } = useAuth();
   const userCity = profile.city || '';
-  const normalizedUserCity = userCity.trim().toLowerCase();
+  const normalizedUserCity = userCity
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
   const cityPrize = getCityPrize(userCity);
   const cityImage = getCityImage(userCity);
 
@@ -368,7 +319,13 @@ export default function HomeScreen() {
     if (!normalizedUserCity) return sponsors;
     const byMap = sponsorsByCity[userCity] || [];
     if (byMap.length > 0) return byMap;
-    return sponsors.filter((sp) => sp.city.trim().toLowerCase() === normalizedUserCity);
+    return sponsors.filter((sp) => (
+      sp.city
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase() === normalizedUserCity
+    ));
   }, [sponsorsByCity, userCity, normalizedUserCity, sponsors]);
 
   const rankedCitySponsors = useMemo(() => {
@@ -381,6 +338,10 @@ export default function HomeScreen() {
 
   const cityOffers = useMemo(() => {
     return citySponsors.flatMap((sp) => sp.offers);
+  }, [citySponsors]);
+
+  const cityReelsCount = useMemo(() => {
+    return citySponsors.reduce((total, sponsor) => total + (sponsor.promotionalVideos?.length || 0), 0);
   }, [citySponsors]);
 
   const allOffers = useMemo(() => {
@@ -416,6 +377,11 @@ export default function HomeScreen() {
   const handleScan = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     router.push('/(tabs)/scanner');
+  }, [router]);
+
+  const handleOpenReels = useCallback(() => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push('/reels');
   }, [router]);
 
   const handleSponsorPress = useCallback((sponsorId: string) => {
@@ -486,6 +452,17 @@ export default function HomeScreen() {
               <Text style={s.quickTxt}>ESCANEAR CUPOM</Text>
             </LinearGradient>
           </TouchableOpacity>
+          <TouchableOpacity style={[s.quickBtn, s.quickBtnDark]} onPress={handleOpenReels} activeOpacity={0.8}>
+            <LinearGradient colors={['#111827', '#030712']} style={s.quickGradAlt}>
+              <PlayCircle size={22} color={Colors.dark.primary} />
+              <View>
+                <Text style={s.quickTxtAlt}>REELS DA CIDADE</Text>
+                <Text style={s.quickSubTxtAlt}>
+                  {userCity ? (cityReelsCount > 0 ? `${cityReelsCount} videos ativos` : 'Sem videos por enquanto') : 'Defina sua cidade'}
+                </Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
 
         {hasCityStores && (
@@ -535,8 +512,12 @@ const s = StyleSheet.create({
   balanceTxt: { color: Colors.dark.primary, fontSize: 14, fontWeight: '800' as const },
   quickRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 16 },
   quickBtn: { flex: 1, borderRadius: 14, overflow: 'hidden', shadowColor: '#F97316', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
+  quickBtnDark: { shadowColor: '#000', shadowOpacity: 0.22 },
   quickGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
   quickTxt: { color: '#FFF', fontSize: 14, fontWeight: '900' as const, letterSpacing: 0.5 },
+  quickGradAlt: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, paddingHorizontal: 16, gap: 10 },
+  quickTxtAlt: { color: '#FFF', fontSize: 12, fontWeight: '900' as const, letterSpacing: 0.5 },
+  quickSubTxtAlt: { color: 'rgba(255,255,255,0.68)', fontSize: 10, marginTop: 1, fontWeight: '600' as const },
   sponsorsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginTop: 4, marginBottom: 4 },
   sponsorsTitle: { color: Colors.dark.text, fontSize: 20, fontWeight: '800' as const },
   sponsorsSubTitle: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 1 },
