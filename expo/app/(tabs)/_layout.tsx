@@ -89,9 +89,17 @@ export default function TabLayout() {
             tabBarIcon: ({ color, size }) => <PlayCircle size={size} color={color} />,
             tabBarButton: (props: any) => (
               <TouchableOpacity
-                {...props}
+                accessibilityLabel={props.accessibilityLabel}
+                accessibilityState={props.accessibilityState}
+                accessibilityRole={props.accessibilityRole}
+                testID={props.testID}
+                onLongPress={props.onLongPress}
+                style={props.style}
+                activeOpacity={0.8}
                 onPress={handleReelsPress}
-              />
+              >
+                {props.children}
+              </TouchableOpacity>
             ),
           }}
         />

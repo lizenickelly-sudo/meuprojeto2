@@ -101,21 +101,12 @@ export default function IdentityVerifyScreen() {
   }, [step]);
 
   useEffect(() => {
-    setSelfieUrl((current) => profile.selfieUrl || current);
-    setDocumentUrl((current) => profile.documentUrl || current);
-    setCpfInput((current) => (profile.cpf ? formatCPF(profile.cpf) : current));
-    setCpfDocInput((current) => (profile.cpf ? formatCPF(profile.cpf) : current));
-    setStep((current) => {
-      if (current === 4) return current;
-
-      const effectiveSelfieUrl = profile.selfieUrl || selfieUrl;
-      const effectiveDocumentUrl = profile.documentUrl || documentUrl;
-      const effectiveCpf = profile.cpf || cpfInput.replace(/\D/g, '');
-      const syncedStep = getInitialVerificationStep(effectiveSelfieUrl, effectiveDocumentUrl, effectiveCpf);
-
-      return Math.max(current, syncedStep);
-    });
-  }, [profile.selfieUrl, profile.documentUrl, profile.cpf, selfieUrl, documentUrl, cpfInput]);
+    setSelfieUrl(profile.selfieUrl || '');
+    setDocumentUrl(profile.documentUrl || '');
+    setCpfInput(formatCPF(profile.cpf || ''));
+    setCpfDocInput(formatCPF(profile.cpf || ''));
+    setStep(getInitialVerificationStep(profile.selfieUrl, profile.documentUrl, profile.cpf));
+  }, [profile.selfieUrl, profile.documentUrl, profile.cpf]);
 
   useEffect(() => {
     cropZoomRef.current = cropZoom;
