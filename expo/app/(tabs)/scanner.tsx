@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated, ScrollView, Modal, Alert, RefreshControl, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image } from 'expo-image';
 import { CheckCircle, XCircle, Clock, Camera, FlashlightOff, Flashlight, RefreshCw, ArrowRight, Wallet, DollarSign, Ticket, ScanLine, AlertTriangle, Gift, MapPin, Store, ShoppingBag, Settings } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -257,7 +258,7 @@ export default function ScannerScreen() {
     Animated.spring(promoAnim, { toValue: 1, friction: 4, useNativeDriver: true }).start();
     addScannedMessage({
       id: `msg_${Date.now()}`, code: promo.id, sponsorId: promo.sponsorId, sponsorName: promo.sponsorName,
-      sponsorAddress: promo.sponsorAddress, message: promo.message, couponValue: promo.couponValue,
+      sponsorAddress: promo.sponsorAddress, backgroundImageUrl: promo.backgroundImageUrl, message: promo.message, couponValue: promo.couponValue,
       minPurchase: promo.minPurchase, scannedAt: new Date().toISOString(), status: 'pending',
     });
   }, [promoAnim, addScannedMessage]);
@@ -301,7 +302,7 @@ export default function ScannerScreen() {
           if (promo) { showPromoModal(promo); return; }
           const fallbackPromo: PromotionalQR = {
             id: parsed.promoId, sponsorId: parsed.sponsorId ?? '', sponsorName: parsed.sponsorName ?? 'Loja Parceira',
-            sponsorAddress: parsed.sponsorAddress ?? '', city: parsed.city ?? '', state: parsed.state ?? '',
+            sponsorAddress: parsed.sponsorAddress ?? '', backgroundImageUrl: parsed.backgroundImageUrl ?? '', city: parsed.city ?? '', state: parsed.state ?? '',
             message: parsed.message ?? '', couponValue: parsed.couponValue ?? 10, minPurchase: parsed.minPurchase ?? 100,
             createdAt: new Date().toISOString(), active: true,
           };
@@ -474,11 +475,17 @@ export default function ScannerScreen() {
       <Modal visible={showPromo} transparent animationType="fade" onRequestClose={closePromo}>
         <View style={pm.ov}>
           <Animated.View style={[pm.ct, { transform: [{ scale: promoAnim }], opacity: promoAnim }]}>
+            {lastPromo?.backgroundImageUrl ? (
+              <>
+                <Image source={{ uri: lastPromo.backgroundImageUrl }} style={pm.bgImage} contentFit="cover" contentPosition="center" cachePolicy="memory-disk" />
+                <LinearGradient colors={['rgba(0,0,0,0.12)', 'rgba(0,0,0,0.42)']} style={pm.bgOverlay} />
+              </>
+            ) : null}
             <LinearGradient colors={['#FFBE0B', '#FF8C00']} style={pm.topStrip}><Gift size={22} color="#000" /><Text style={pm.topTxt}>PROMOÇÃO ESPECIAL!</Text></LinearGradient>
             <View style={pm.body}>
-              <View style={pm.congratsWrap}><Text style={pm.congratsEmoji}>🎉</Text><Text style={pm.congratsTitle}>Parabéns!</Text></View>
-              <View style={pm.messageCard}><Text style={pm.messageText}>{lastPromo?.message || `Ganhe R$ ${(lastPromo?.couponValue ?? 10).toFixed(2)} com compra mínima de R$ ${(lastPromo?.minPurchase ?? 100).toFixed(2)}!`}</Text></View>
-              <View style={pm.storeCard}>
+              <View style={pm.congratsWrap}><Text style={pm.congratsEmoji}>🎉</Text><Text style={[pm.congratsTitle, lastPromo?.backgroundImageUrl ? pm.congratsTitleOnImage : null]}>Parabéns!</Text></View>
+              <View style={[pm.messageCard, lastPromo?.backgroundImageUrl ? pm.messageCardOnImage : null]}><Text style={pm.messageText}>{lastPromo?.message || `Ganhe R$ ${(lastPromo?.couponValue ?? 10).toFixed(2)} com compra mínima de R$ ${(lastPromo?.minPurchase ?? 100).toFixed(2)}!`}</Text></View>
+              <View style={[pm.storeCard, lastPromo?.backgroundImageUrl ? pm.storeCardOnImage : null]}>
                 <View style={pm.storeRow}><View style={pm.storeIconWrap}><Store size={20} color={Colors.dark.primary} /></View><View style={pm.storeInfo}><Text style={pm.storeName}>{lastPromo?.sponsorName ?? 'Loja Parceira'}</Text>{lastPromo?.sponsorAddress ? <View style={pm.addressRow}><MapPin size={12} color={Colors.dark.textMuted} /><Text style={pm.storeAddress}>{lastPromo.sponsorAddress}</Text></View> : null}</View></View>
                 <View style={pm.detailsGrid}>
                   <View style={pm.detailBox}><DollarSign size={16} color={Colors.dark.success} /><Text style={pm.detailBoxLabel}>Valor PIX</Text><Text style={pm.detailBoxValue}>R$ {(lastPromo?.couponValue ?? 10).toFixed(2)}</Text></View>
@@ -606,15 +613,20 @@ const er = StyleSheet.create({
 const pm = StyleSheet.create({
   ov: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
   ct: { backgroundColor: '#FFFFFF', borderRadius: 24, width: '100%', maxWidth: 400, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(245,158,11,0.2)' },
+  bgImage: { ...StyleSheet.absoluteFillObject },
+  bgOverlay: { ...StyleSheet.absoluteFillObject },
   topStrip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
   topTxt: { color: '#FFF', fontSize: 15, fontWeight: '800' as const, letterSpacing: 1.5 },
   body: { padding: 20, alignItems: 'center' },
   congratsWrap: { alignItems: 'center', marginBottom: 16 },
   congratsEmoji: { fontSize: 40, marginBottom: 6 },
   congratsTitle: { fontSize: 24, fontWeight: '900' as const, color: Colors.dark.text },
+  congratsTitleOnImage: { color: '#FFFFFF', textShadowColor: 'rgba(0,0,0,0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
   messageCard: { backgroundColor: 'rgba(255,190,11,0.08)', borderRadius: 14, padding: 16, width: '100%', borderWidth: 1, borderColor: 'rgba(255,190,11,0.2)', marginBottom: 14 },
+  messageCardOnImage: { backgroundColor: 'rgba(255,255,255,0.9)', borderColor: 'rgba(255,255,255,0.28)' },
   messageText: { color: Colors.dark.text, fontSize: 15, fontWeight: '600' as const, lineHeight: 22, textAlign: 'center' as const },
   storeCard: { backgroundColor: Colors.dark.inputBg, borderRadius: 14, padding: 14, width: '100%', borderWidth: 1, borderColor: Colors.dark.inputBorder, marginBottom: 12 },
+  storeCardOnImage: { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: 'rgba(255,255,255,0.3)' },
   storeRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   storeIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: Colors.dark.primaryFaint, alignItems: 'center', justifyContent: 'center' },
   storeInfo: { flex: 1 },

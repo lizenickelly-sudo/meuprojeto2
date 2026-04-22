@@ -327,14 +327,6 @@ export default function OfferDetailModal({
                 windowSize={3}
               />
 
-              {modalEntries.length > 1 && (
-                <View style={ms.hintWrap}>
-                  <View style={ms.hintChip}>
-                    <Text style={ms.hintText}>Deslize para cima para ver mais promoções</Text>
-                  </View>
-                </View>
-              )}
-
               <View style={ms.overlayContent}>
                 {modalEntries.length > 1 && (
                   <View style={ms.carouselDots}>
@@ -492,24 +484,6 @@ const ms = StyleSheet.create({
   },
   reelFade: {
     ...StyleSheet.absoluteFillObject,
-  },
-  hintWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    top: 16,
-    alignItems: 'center',
-  },
-  hintChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-  },
-  hintText: {
-    color: '#111827',
-    fontSize: 12,
-    fontWeight: '700' as const,
   },
   overlayContent: {
     position: 'absolute',

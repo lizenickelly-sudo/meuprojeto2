@@ -137,6 +137,9 @@ export default function ProfileScreen() {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }, []);
+  const openIdentityVerification = useCallback(() => {
+    router.push('/identity-verify');
+  }, [router]);
 
   const handleCpfChange = useCallback((newCpf: string) => {
     const masked = formatCPF(newCpf);
@@ -203,10 +206,14 @@ export default function ProfileScreen() {
   }, [ed, profile, saveProfile]);
 
   const cityOptions = useMemo(() => {
+    const selectedState = (ed ? f.state : profile.state).trim().toUpperCase();
+    const citiesForSelectedState = selectedState
+      ? ALL_CITY_OPTIONS.filter(({ state }) => state === selectedState)
+      : ALL_CITY_OPTIONS;
     const search = citySearch.toLowerCase().trim();
-    if (!search) return ALL_CITY_OPTIONS;
-    return ALL_CITY_OPTIONS.filter(({ city, state }) => city.toLowerCase().includes(search) || state.toLowerCase().includes(search));
-  }, [citySearch]);
+    if (!search) return citiesForSelectedState;
+    return citiesForSelectedState.filter(({ city, state }) => city.toLowerCase().includes(search) || state.toLowerCase().includes(search));
+  }, [citySearch, ed, f.state, profile.state]);
 
   const triggerShake = useCallback(() => {
     Animated.sequence([
@@ -289,9 +296,8 @@ export default function ProfileScreen() {
               <Text style={s.profileName}>{profile.name || 'Visitante'}</Text>
               {profile.city ? <View style={s.locationRow}><MapPin size={13} color={Colors.dark.textSecondary} /><Text style={s.profileLocation}>{profile.city}, {profile.state}</Text></View> : <Text style={s.profileLocation}>Localização não definida</Text>}
               {!ed && !isIdentityVerified && !hasPendingIdentityVerification && (
-                <TouchableOpacity style={s.verifyBtn} onPress={() => router.push('/identity-verify')}><Shield size={13} color="#000" /><Text style={s.verifyBtnText}>Verificar</Text></TouchableOpacity>
+                <TouchableOpacity style={s.verifyBtn} onPress={openIdentityVerification}><Shield size={13} color="#000" /><Text style={s.verifyBtnText}>Verificar</Text></TouchableOpacity>
               )}
-              {!ed && !isIdentityVerified && hasPendingIdentityVerification && <View style={s.pendingInline}><AlertTriangle size={13} color={Colors.dark.warning} /><Text style={s.pendingInlineText}>Em análise</Text></View>}
               {isIdentityVerified && <View style={s.verifiedInline}><BadgeCheck size={13} color={Colors.dark.success} /><Text style={s.verifiedInlineText}>Verificado</Text></View>}
             </View>
           </View>
@@ -360,8 +366,8 @@ export default function ProfileScreen() {
           <View style={[s.sectionHeader, s.sectionHeaderExpanded]}><View style={s.sectionHeaderMain}><Shield size={18} color={Colors.dark.primary} /><Text style={s.sectionTitle}>Segurança</Text></View></View>
           <View style={s.sectionBody}>
             <View style={s.securityRow}>
-              <View style={s.securityInfo}><Text style={s.securityLabel}>Verificação de Identidade</Text><Text style={s.securityDesc}>{isIdentityVerified ? 'Conta verificada e ativada' : hasPendingIdentityVerification ? 'Documentos enviados. Aguarde a ativação do administrador.' : 'Verifique para sacar'}</Text></View>
-              {isIdentityVerified ? <View style={s.verifiedTag}><BadgeCheck size={14} color={Colors.dark.success} /><Text style={s.verifiedTagText}>Verificado</Text></View> : hasPendingIdentityVerification ? <View style={s.pendingTag}><AlertTriangle size={14} color={Colors.dark.warning} /><Text style={s.pendingTagText}>Em análise</Text></View> : <TouchableOpacity style={s.verifyActionBtn} onPress={() => router.push('/identity-verify')}><Text style={s.verifyActionText}>Verificar</Text></TouchableOpacity>}
+              <View style={s.securityInfo}><Text style={s.securityLabel}>Verificação de Identidade</Text><Text style={s.securityDesc}>{isIdentityVerified ? 'Conta verificada e ativada' : hasPendingIdentityVerification ? 'Documentos enviados. Toque no botão ao lado para editar selfie, documento e CPF.' : 'Verifique para sacar'}</Text></View>
+              {isIdentityVerified ? <View style={s.verifiedTag}><BadgeCheck size={14} color={Colors.dark.success} /><Text style={s.verifiedTagText}>Verificado</Text></View> : hasPendingIdentityVerification ? <TouchableOpacity style={s.pendingTag} onPress={openIdentityVerification} activeOpacity={0.8}><AlertTriangle size={14} color={Colors.dark.warning} /><View style={s.pendingTagTextWrap}><Text style={s.pendingTagText}>Em análise</Text><Text style={s.pendingTagHint}>Mandar doc</Text></View></TouchableOpacity> : <TouchableOpacity style={s.verifyActionBtn} onPress={openIdentityVerification}><Text style={s.verifyActionText}>Verificar</Text></TouchableOpacity>}
             </View>
             <View style={[s.securityRow, s.securityRowSeparated]}>
               <View style={s.securityInfo}>
@@ -486,8 +492,6 @@ const s = StyleSheet.create({
   avatarBadge: { position: 'absolute' as const, bottom: -2, right: -2, width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.dark.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
   profileName: { fontSize: 22, fontWeight: '800' as const, color: Colors.dark.text },
   profileLocation: { fontSize: 14, color: Colors.dark.textSecondary },
-  pendingInline: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
-  pendingInlineText: { color: Colors.dark.warning, fontSize: 12, fontWeight: '600' as const },
   verifiedInline: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
   verifiedInlineText: { color: Colors.dark.success, fontSize: 12, fontWeight: '600' as const },
   verifyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, backgroundColor: Colors.dark.primary, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, alignSelf: 'flex-start' as const },
@@ -527,8 +531,10 @@ const s = StyleSheet.create({
   securityDesc: { color: Colors.dark.textSecondary, fontSize: 12, marginTop: 2 },
   verifiedTag: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.08)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   verifiedTagText: { color: Colors.dark.success, fontSize: 12, fontWeight: '600' as const },
-  pendingTag: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  pendingTag: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(245,158,11,0.12)', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(245,158,11,0.22)' },
+  pendingTagTextWrap: { gap: 1 },
   pendingTagText: { color: Colors.dark.warning, fontSize: 12, fontWeight: '600' as const },
+  pendingTagHint: { color: Colors.dark.textSecondary, fontSize: 11, fontWeight: '500' as const },
   accountStatusTag: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8 },
   accountStatusTagActive: { backgroundColor: 'rgba(16,185,129,0.08)' },
   accountStatusTagPending: { backgroundColor: 'rgba(245,158,11,0.1)' },

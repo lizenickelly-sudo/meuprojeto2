@@ -151,6 +151,7 @@ export interface ScannedMessage {
   sponsorId: string;
   sponsorName: string;
   sponsorAddress: string;
+  backgroundImageUrl?: string;
   message: string;
   couponValue: number;
   minPurchase: number;
@@ -163,6 +164,7 @@ export interface PromotionalQR {
   sponsorId: string;
   sponsorName: string;
   sponsorAddress: string;
+  backgroundImageUrl?: string;
   city: string;
   state: string;
   message: string;

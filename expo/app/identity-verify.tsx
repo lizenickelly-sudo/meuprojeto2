@@ -38,16 +38,23 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function getInitialVerificationStep(selfieUrl?: string, documentUrl?: string, cpf?: string): number {
+  if (!selfieUrl) return 0;
+  if (!documentUrl) return 1;
+  if (!cpf) return 2;
+  return 3;
+}
+
 export default function IdentityVerifyScreen() {
   console.log("[IdentityVerify] Verification screen initialized");
   const router = useRouter();
   const { profile, saveProfile } = useUser();
   const { addNotification } = useAdmin();
-  const [step, setStep] = useState<number>(0);
-  const [selfieUrl, setSelfieUrl] = useState<string>('');
-  const [documentUrl, setDocumentUrl] = useState<string>('');
+  const [step, setStep] = useState<number>(() => getInitialVerificationStep(profile.selfieUrl, profile.documentUrl, profile.cpf));
+  const [selfieUrl, setSelfieUrl] = useState<string>(profile.selfieUrl || '');
+  const [documentUrl, setDocumentUrl] = useState<string>(profile.documentUrl || '');
   const [cpfInput, setCpfInput] = useState<string>(formatCPF(profile.cpf || ''));
-  const [cpfDocInput, setCpfDocInput] = useState<string>('');
+  const [cpfDocInput, setCpfDocInput] = useState<string>(formatCPF(profile.cpf || ''));
   const [cpfValid, setCpfValid] = useState<boolean>(false);
   const [cpfDocValid, setCpfDocValid] = useState<boolean>(false);
   const [cpfMatch, setCpfMatch] = useState<boolean>(false);
@@ -92,6 +99,23 @@ export default function IdentityVerifyScreen() {
       ]).start();
     }
   }, [step]);
+
+  useEffect(() => {
+    setSelfieUrl((current) => profile.selfieUrl || current);
+    setDocumentUrl((current) => profile.documentUrl || current);
+    setCpfInput((current) => (profile.cpf ? formatCPF(profile.cpf) : current));
+    setCpfDocInput((current) => (profile.cpf ? formatCPF(profile.cpf) : current));
+    setStep((current) => {
+      if (current === 4) return current;
+
+      const effectiveSelfieUrl = profile.selfieUrl || selfieUrl;
+      const effectiveDocumentUrl = profile.documentUrl || documentUrl;
+      const effectiveCpf = profile.cpf || cpfInput.replace(/\D/g, '');
+      const syncedStep = getInitialVerificationStep(effectiveSelfieUrl, effectiveDocumentUrl, effectiveCpf);
+
+      return Math.max(current, syncedStep);
+    });
+  }, [profile.selfieUrl, profile.documentUrl, profile.cpf, selfieUrl, documentUrl, cpfInput]);
 
   useEffect(() => {
     cropZoomRef.current = cropZoom;
@@ -398,6 +422,14 @@ export default function IdentityVerifyScreen() {
     }
   }, [cpfValid, cpfDocValid, cpfMatch, selfieUrl, documentUrl, cpfInput, profile, saveProfile, addNotification]);
 
+  const canOpenStep = useCallback((targetStep: number) => {
+    if (targetStep <= 0) return true;
+    if (targetStep === 1) return Boolean(selfieUrl);
+    if (targetStep === 2) return Boolean(selfieUrl && documentUrl);
+    if (targetStep === 3) return Boolean(selfieUrl && documentUrl && cpfValid && cpfDocValid && cpfMatch);
+    return false;
+  }, [cpfDocValid, cpfMatch, cpfValid, documentUrl, selfieUrl]);
+
   if (step === 4) {
     return (
       <View style={v.ctr}>
@@ -428,16 +460,17 @@ export default function IdentityVerifyScreen() {
           <Shield size={32} color={Colors.dark.neonGreen} />
           <Text style={v.headerTtl}>Verificacao de Identidade</Text>
           <Text style={v.headerDesc}>Para sua seguranca, precisamos verificar sua identidade antes de permitir saques. Tenha um RG ou CNH disponível.</Text>
+          {profile.adminReviewStatus === 'pending' ? <Text style={v.reviewHint}>Documentos em análise. Toque nas etapas para revisar ou substituir selfie, documento e CPF.</Text> : null}
         </View>
 
         <View style={v.stepsRow}>
           {['Selfie', 'Documento', 'CPF', 'Confirmar'].map((label, i) => (
-            <View key={label} style={v.stepItem}>
-              <View style={[v.stepCircle, step >= i && v.stepCircleActive]}>
+            <TouchableOpacity key={label} style={v.stepItem} onPress={() => canOpenStep(i) && setStep(i)} activeOpacity={canOpenStep(i) ? 0.8 : 1} disabled={!canOpenStep(i)}>
+              <View style={[v.stepCircle, step >= i && v.stepCircleActive, canOpenStep(i) && v.stepCircleEnabled]}>
                 <Text style={[v.stepNum, step >= i && v.stepNumActive]}>{i + 1}</Text>
               </View>
-              <Text style={[v.stepLabel, step >= i && v.stepLabelActive, { fontSize: 10 }]}>{label}</Text>
-            </View>
+              <Text style={[v.stepLabel, step >= i && v.stepLabelActive, canOpenStep(i) && v.stepLabelEnabled, { fontSize: 10 }]}>{label}</Text>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -653,13 +686,16 @@ const v = StyleSheet.create({
   headerCard: { alignItems: 'center', marginHorizontal: 16, marginBottom: 24, gap: 8 },
   headerTtl: { color: Colors.dark.text, fontSize: 22, fontWeight: '800' as const, textAlign: 'center' },
   headerDesc: { color: Colors.dark.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20, paddingHorizontal: 16 },
+  reviewHint: { color: Colors.dark.warning, fontSize: 12, fontWeight: '600' as const, textAlign: 'center', lineHeight: 18, marginTop: 4, paddingHorizontal: 12 },
   stepsRow: { flexDirection: 'row', justifyContent: 'center', gap: 32, marginBottom: 28 },
   stepItem: { alignItems: 'center', gap: 6 },
   stepCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.dark.card, borderWidth: 2, borderColor: Colors.dark.cardBorder, alignItems: 'center', justifyContent: 'center' },
+  stepCircleEnabled: { borderColor: 'rgba(0,255,135,0.28)' },
   stepCircleActive: { backgroundColor: Colors.dark.neonGreenFaint, borderColor: Colors.dark.neonGreen },
   stepNum: { color: Colors.dark.textMuted, fontSize: 14, fontWeight: '800' as const },
   stepNumActive: { color: Colors.dark.neonGreen },
   stepLabel: { color: Colors.dark.textMuted, fontSize: 11, fontWeight: '600' as const },
+  stepLabelEnabled: { color: Colors.dark.textSecondary },
   stepLabelActive: { color: Colors.dark.neonGreen },
   card: { marginHorizontal: 16, backgroundColor: Colors.dark.card, borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: Colors.dark.cardBorder },
   cardIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center', justifyContent: 'center', marginBottom: 16, borderWidth: 1, borderColor: Colors.dark.neonGreenBorder },

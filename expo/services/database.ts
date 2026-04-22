@@ -22,6 +22,7 @@ type PersistedUserRow = {
 
 type RemoteUserRow = {
   email: string;
+  auth_user_id?: string | null;
   cpf?: string | null;
   name?: string | null;
   phone?: string | null;
@@ -251,6 +252,7 @@ function mapRemotePromoQRCodeRow(row: RemotePromoQRCodeRow): PromotionalQR | nul
     sponsorId,
     sponsorName: String(data.sponsorName || ''),
     sponsorAddress: String(data.sponsorAddress || ''),
+    backgroundImageUrl: data.backgroundImageUrl ? String(data.backgroundImageUrl) : undefined,
     city: row.city ?? String(data.city || ''),
     state: row.state ?? String(data.state || ''),
     message: String(data.message || ''),
@@ -801,6 +803,63 @@ async function upsertUserRemote(profile: UserProfile, balance: number, points: n
   }
 
   return true;
+}
+
+export async function ensureUserRemoteRow(email: string, authUserId?: string): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const normalizedEmail = normalizeEmail(email || '');
+  if (!normalizedEmail) return false;
+
+  let existingRow: RemoteUserRow | null = null;
+  const query = `/rest/v1/users?select=*&email=eq.${encodeURIComponent(normalizedEmail)}&limit=1`;
+  const existingRes = await supabaseRequest(query, { method: 'GET' });
+  if (existingRes.ok) {
+    const rows = (await existingRes.json()) as RemoteUserRow[];
+    existingRow = rows[0] ?? null;
+  } else {
+    const errorText = await existingRes.text();
+    console.log('[DB] ensureUserRemoteRow fetch existing failed:', errorText);
+  }
+
+  const existingProfile = existingRow ? mapRemoteRowToUserProfile(existingRow) : null;
+  const now = new Date().toISOString();
+  const nextProfile: UserProfile = {
+    id: existingProfile?.id || authUserId || normalizedEmail,
+    name: existingProfile?.name || '',
+    cpf: existingProfile?.cpf || '',
+    phone: existingProfile?.phone || '',
+    email: normalizedEmail,
+    city: existingProfile?.city || '',
+    state: existingProfile?.state || '',
+    pixKey: existingProfile?.pixKey || '',
+    pixKeyType: existingProfile?.pixKeyType || 'cpf',
+    pixKeys: existingProfile?.pixKeys,
+    pixCpf: existingProfile?.pixCpf || '',
+    pixPhone: existingProfile?.pixPhone || '',
+    pixEmail: existingProfile?.pixEmail || '',
+    pixRandom: existingProfile?.pixRandom || '',
+    avatarUrl: existingProfile?.avatarUrl,
+    createdAt: existingProfile?.createdAt || existingRow?.created_at || now,
+    referralCode: existingProfile?.referralCode,
+    referredBy: existingProfile?.referredBy,
+    identityVerified: existingProfile?.identityVerified,
+    selfieUrl: existingProfile?.selfieUrl,
+    documentUrl: existingProfile?.documentUrl,
+    savedFields: existingProfile?.savedFields,
+    isActive: existingProfile?.isActive,
+    adminReviewStatus: existingProfile?.adminReviewStatus || 'pending',
+    adminReviewedAt: existingProfile?.adminReviewedAt,
+  };
+
+  return upsertUserRemote(
+    {
+      ...nextProfile,
+      createdAt: existingRow?.created_at || nextProfile.createdAt || now,
+    },
+    Number.isFinite(existingRow?.balance as number) ? Number(existingRow?.balance) : 0,
+    Number.isFinite(existingRow?.points as number) ? Number(existingRow?.points) : 0,
+  );
 }
 
 async function fetchUserRemoteByEmail(email: string): Promise<UserProfile | null> {

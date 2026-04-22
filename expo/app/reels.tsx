@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
-import { ArrowLeft, PlayCircle, Volume2, VolumeX } from 'lucide-react-native';
+import { ArrowLeft, Volume2, VolumeX } from 'lucide-react-native';
 import SponsorReelFeedItem from '@/components/SponsorReelFeedItem';
 import Colors from '@/constants/colors';
 import { useSponsor } from '@/providers/SponsorProvider';
@@ -29,12 +29,13 @@ export default function ReelsScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
   const { sponsors } = useSponsor();
   const { profile } = useUser();
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const [measuredHeight, setMeasuredHeight] = useState<number>(0);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
@@ -45,6 +46,7 @@ export default function ReelsScreen() {
   }, []);
 
   const reelsVisible = isFocused && appState === 'active';
+  const viewportHeight = measuredHeight || windowHeight;
 
   const normalizedCity = normalizeText(profile.city);
   const normalizedState = normalizeText(profile.state);
@@ -87,10 +89,11 @@ export default function ReelsScreen() {
       active={index === activeIndex}
       visible={reelsVisible}
       soundEnabled={soundEnabled}
-      height={height}
+      height={viewportHeight}
+      bottomInset={insets.bottom}
       onOpenSponsor={() => handleOpenSponsor(item.sponsor.id)}
     />
-  ), [activeIndex, handleOpenSponsor, height, reelsVisible, soundEnabled]);
+  ), [activeIndex, handleOpenSponsor, insets.bottom, reelsVisible, soundEnabled, viewportHeight]);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null; isViewable?: boolean }[] }) => {
@@ -131,7 +134,15 @@ export default function ReelsScreen() {
   }
 
   return (
-    <View style={s.screen}>
+    <View
+      style={s.screen}
+      onLayout={(event) => {
+        const nextHeight = Math.round(event.nativeEvent.layout.height);
+        if (nextHeight > 0 && nextHeight !== measuredHeight) {
+          setMeasuredHeight(nextHeight);
+        }
+      }}
+    >
       <StatusBar style="light" />
 
       <FlatList
@@ -139,12 +150,14 @@ export default function ReelsScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         pagingEnabled
+        disableIntervalMomentum
         showsVerticalScrollIndicator={false}
         decelerationRate="fast"
+        snapToInterval={viewportHeight}
         snapToAlignment="start"
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        getItemLayout={(_, index) => ({ length: height, offset: height * index, index })}
+        getItemLayout={(_, index) => ({ length: viewportHeight, offset: viewportHeight * index, index })}
         initialNumToRender={2}
         maxToRenderPerBatch={2}
         windowSize={3}
@@ -167,13 +180,6 @@ export default function ReelsScreen() {
         >
           {soundEnabled ? <Volume2 size={18} color="#FFF" /> : <VolumeX size={18} color="#FFF" />}
         </TouchableOpacity>
-      </View>
-
-      <View style={[s.hintWrap, { bottom: insets.bottom + 16 }]}> 
-        <View style={s.hintChip}>
-          <PlayCircle size={14} color={Colors.dark.primary} />
-          <Text style={s.hintText}>Deslize para cima para ver mais reels da sua cidade</Text>
-        </View>
       </View>
     </View>
   );
@@ -217,26 +223,6 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
-  },
-  hintWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    alignItems: 'center',
-  },
-  hintChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-  },
-  hintText: {
-    color: '#111827',
-    fontSize: 12,
-    fontWeight: '700' as const,
   },
   emptyScreen: {
     flex: 1,

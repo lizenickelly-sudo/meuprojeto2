@@ -6,7 +6,6 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { BadgeCheck, MapPin, ShoppingBag } from 'lucide-react-native';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '@/constants/colors';
-import { formatVideoDuration } from '@/lib/sponsorMedia';
 import type { Sponsor, SponsorVideo } from '@/types';
 
 export default function SponsorReelFeedItem({
@@ -16,6 +15,7 @@ export default function SponsorReelFeedItem({
   visible,
   soundEnabled,
   height,
+  bottomInset,
   onOpenSponsor,
 }: {
   sponsor: Sponsor;
@@ -24,6 +24,7 @@ export default function SponsorReelFeedItem({
   visible: boolean;
   soundEnabled: boolean;
   height: number;
+  bottomInset: number;
   onOpenSponsor: () => void;
 }) {
   const player = useVideoPlayer({
@@ -71,7 +72,7 @@ export default function SponsorReelFeedItem({
         style={s.fade}
       />
 
-      <View style={s.content}>
+      <View style={[s.content, { paddingBottom: Math.max(bottomInset, 18) + 28 }]}>
         <View style={s.headerChip}>
           <Image source={{ uri: sponsor.logoUrl || sponsor.imageUrl }} style={s.logo} contentFit="cover" cachePolicy="memory-disk" />
           <View style={s.headerInfo}>
@@ -94,10 +95,11 @@ export default function SponsorReelFeedItem({
           </View>
         </View>
 
-        <Text style={s.reelSubtitle} numberOfLines={2}>
-          {formatVideoDuration(video.durationSeconds)}
-          {sponsor.address ? ` • ${sponsor.address}` : ''}
-        </Text>
+        {sponsor.address ? (
+          <Text style={s.reelSubtitle} numberOfLines={2}>
+            {sponsor.address}
+          </Text>
+        ) : null}
 
         <TouchableOpacity style={s.ctaButton} onPress={onOpenSponsor} activeOpacity={0.85}>
           <Text style={s.ctaText}>Abrir loja</Text>
@@ -114,6 +116,7 @@ const s = StyleSheet.create({
   container: {
     backgroundColor: '#050505',
     justifyContent: 'flex-end',
+    overflow: 'hidden',
   },
   video: {
     ...StyleSheet.absoluteFillObject,
@@ -124,7 +127,6 @@ const s = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 18,
-    paddingBottom: 34,
     gap: 10,
   },
   headerChip: {

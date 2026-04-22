@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { hashPassword, verifyPassword } from '@/lib/crypto';
 import { supabase } from '@/lib/supabase';
-import { fetchUser as dbFetchUser } from '@/services/database';
+import { ensureUserRemoteRow, fetchUser as dbFetchUser } from '@/services/database';
 
 interface AuthUser {
   email: string;
@@ -174,39 +174,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) return;
 
-    try {
-      const now = new Date().toISOString();
-      const { data: existingRows } = await supabase
-        .from('users')
-        .select('profile,created_at')
-        .eq('email', normalizedEmail)
-        .limit(1);
-
-      const existingRow = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
-      const existingProfile = existingRow?.profile && typeof existingRow.profile === 'object'
-        ? existingRow.profile as Record<string, unknown>
-        : {};
-      const createdAt = existingRow?.created_at || (typeof existingProfile.createdAt === 'string' ? existingProfile.createdAt : now);
-
-      await supabase
-        .from('users')
-        .upsert({
-          email: normalizedEmail,
-          auth_user_id: authUserId || (typeof existingProfile.authUserId === 'string' ? existingProfile.authUserId : null),
-          profile: {
-            ...existingProfile,
-            email: normalizedEmail,
-            authUserId: authUserId || (typeof existingProfile.authUserId === 'string' ? existingProfile.authUserId : ''),
-            createdAt,
-            adminReviewStatus: typeof existingProfile.adminReviewStatus === 'string' ? existingProfile.adminReviewStatus : 'pending',
-          },
-          updated_at: now,
-          created_at: createdAt,
-        }, {
-          onConflict: 'email',
-        });
-    } catch (error) {
-      console.log('[AuthProvider] ensureRemoteUserRow fallback:', error);
+    const saved = await ensureUserRemoteRow(normalizedEmail, authUserId);
+    if (!saved) {
+      console.log('[AuthProvider] Failed to ensure public.users row for:', normalizedEmail);
     }
   }, []);
 
@@ -216,6 +186,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[AuthProvider] Registering user:', normalizedEmail);
       const users = await getUsers();
       const existingLocalUser = users.find((u) => u.email.toLowerCase() === normalizedEmail);
+      const isInvalidCredentialsError = (msg: string) => /invalid login credentials|invalid credentials/i.test(msg);
 
       let remoteUserId = '';
       let remoteSignUpSucceeded = false;
@@ -231,6 +202,22 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         } else {
           if (/already registered|already exists|user already/i.test(error.message)) {
             remoteAlreadyRegistered = true;
+
+            try {
+              const signInAttempt = await supabase.auth.signInWithPassword({
+                email: normalizedEmail,
+                password,
+              });
+
+              if (!signInAttempt.error) {
+                remoteUserId = signInAttempt.data.user?.id || '';
+                remoteSignUpSucceeded = true;
+              } else if (!isInvalidCredentialsError(signInAttempt.error.message || '')) {
+                console.log('[AuthProvider] Supabase signIn during register recovery fallback:', signInAttempt.error.message);
+              }
+            } catch (recoveryError) {
+              console.log('[AuthProvider] Supabase register recovery exception:', recoveryError);
+            }
           }
           console.log('[AuthProvider] Supabase signUp fallback:', error.message);
         }
@@ -245,7 +232,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Nao foi possivel criar conta agora. Tente novamente em instantes.');
       }
 
-      if (remoteAlreadyRegistered || (!remoteSignUpSucceeded && existingLocalUser)) {
+      if (!remoteSignUpSucceeded && (remoteAlreadyRegistered || existingLocalUser)) {
         throw new Error('Este e-mail já está cadastrado. Tente entrar ou recuperar a senha.');
       }
 

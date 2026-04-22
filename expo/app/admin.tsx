@@ -1527,6 +1527,7 @@ function PromoQRPreviewModal({
     sponsorId: promo.sponsorId,
     sponsorName: promo.sponsorName,
     sponsorAddress: promo.sponsorAddress,
+    backgroundImageUrl: promo.backgroundImageUrl,
     message: promo.message,
     couponValue: promo.couponValue,
     minPurchase: promo.minPurchase,
@@ -1554,6 +1555,12 @@ function PromoQRPreviewModal({
             {promo.sponsorAddress && <Text style={pqm.storeAddr}>{promo.sponsorAddress}</Text>}
             <Text style={pqm.storeValue}>Pix R$ {promo.couponValue.toFixed(2)} | Compra min R$ {promo.minPurchase.toFixed(2)}</Text>
           </View>
+
+          {promo.backgroundImageUrl ? (
+            <View style={pqm.bgPreviewWrap}>
+              <Image source={{ uri: promo.backgroundImageUrl }} style={pqm.bgPreviewImg} contentFit="cover" contentPosition="center" />
+            </View>
+          ) : null}
 
           <View style={pqm.qrWrapper}>
             <Image
@@ -1601,6 +1608,8 @@ const pqm = StyleSheet.create({
   storeName: { color: Colors.dark.text, fontSize: 18, fontWeight: '700' as const },
   storeAddr: { color: Colors.dark.textMuted, fontSize: 13, marginTop: 4 },
   storeValue: { color: '#F59E0B', fontSize: 14, fontWeight: '700' as const, marginTop: 8, backgroundColor: 'rgba(245, 158, 11, 0.08)', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
+  bgPreviewWrap: { borderRadius: 14, overflow: 'hidden' as const, minHeight: 180, borderWidth: 1, borderColor: Colors.dark.cardBorder },
+  bgPreviewImg: { width: '100%', height: 180 },
   qrWrapper: { backgroundColor: Colors.dark.card, borderRadius: 14, padding: 20, borderWidth: 1, borderColor: Colors.dark.cardBorder, alignItems: 'center' as const, minHeight: 320 },
   qrImage: { width: 280, height: 280 },
   messageSection: { backgroundColor: Colors.dark.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Colors.dark.cardBorder },
@@ -1781,9 +1790,10 @@ export default function AdminPanel() {
   const [showPromoForm, setShowPromoForm] = useState<boolean>(false);
   const [previewPromoQR, setPreviewPromoQR] = useState<PromotionalQR | null>(null);
   const [showPromoQRPreview, setShowPromoQRPreview] = useState<boolean>(false);
-  const [promoForm, setPromoForm] = useState<{ sponsorId: string; sponsorName: string; sponsorAddress: string; message: string; couponValue: string; minPurchase: string }>({
-    sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100',
+  const [promoForm, setPromoForm] = useState<{ sponsorId: string; sponsorName: string; sponsorAddress: string; backgroundImageUrl: string; message: string; couponValue: string; minPurchase: string }>({
+    sponsorId: '', sponsorName: '', sponsorAddress: '', backgroundImageUrl: '', message: '', couponValue: '10', minPurchase: '100',
   });
+  const [promoBgUploadMeta, setPromoBgUploadMeta] = useState<{ fileName?: string; mimeType?: string } | null>(null);
 
   const [showAddCityModal, setShowAddCityModal] = useState<boolean>(false);
   const [syncingServer, setSyncingServer] = useState<boolean>(false);
@@ -1802,9 +1812,11 @@ export default function AdminPanel() {
 
   const suggestedCities = useMemo(() => {
     const normalizedSearch = normalizeSearchText(newCitySearch);
-    if (!normalizedSearch) return ALL_CITY_OPTIONS;
+    const citiesForSelectedState = ALL_CITY_OPTIONS.filter(({ state }) => state === newCityState);
 
-    return ALL_CITY_OPTIONS.filter(({ city, state }) => {
+    if (!normalizedSearch) return citiesForSelectedState;
+
+    return citiesForSelectedState.filter(({ city, state }) => {
       const normalizedCity = normalizeSearchText(city);
       const normalizedState = normalizeSearchText(state);
 
@@ -1812,7 +1824,7 @@ export default function AdminPanel() {
         || normalizedState.startsWith(normalizedSearch)
         || normalizedCity.split(' ').some((part) => part.startsWith(normalizedSearch));
     });
-  }, [newCitySearch]);
+  }, [newCitySearch, newCityState]);
 
   const getCityImageUri = useCallback((city: string | null) => {
     if (!city) return null;
@@ -2228,6 +2240,31 @@ export default function AdminPanel() {
             fileName: editedAsset.fileName,
             mimeType: editedAsset.mimeType,
           });
+        },
+      });
+    }
+  }, []);
+
+  const handlePickPromoBackground = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      setImageCanvasSession({
+        asset: mapPickerAssetToImageCanvasAsset(result.assets[0]),
+        title: 'Editar fundo do QR promocional',
+        description: 'Ajuste a imagem que aparecera no card do usuario apos o scan.',
+        aspectRatio: 16 / 9,
+        confirmLabel: 'USAR NO QR PROMO',
+        onConfirm: async (editedAsset) => {
+          setPromoForm((prev) => ({ ...prev, backgroundImageUrl: editedAsset.uri }));
+          setPromoBgUploadMeta({
+            fileName: editedAsset.fileName,
+            mimeType: editedAsset.mimeType,
+          });
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         },
       });
     }
@@ -3010,18 +3047,20 @@ export default function AdminPanel() {
         sponsorId: promo.sponsorId,
         sponsorName: promo.sponsorName,
         sponsorAddress: promo.sponsorAddress,
+        backgroundImageUrl: promo.backgroundImageUrl || '',
         message: promo.message,
         couponValue: promo.couponValue.toString(),
         minPurchase: promo.minPurchase.toString(),
       });
     } else {
       setEditingPromo(null);
-      setPromoForm({ sponsorId: '', sponsorName: '', sponsorAddress: '', message: '', couponValue: '10', minPurchase: '100' });
+      setPromoForm({ sponsorId: '', sponsorName: '', sponsorAddress: '', backgroundImageUrl: '', message: '', couponValue: '10', minPurchase: '100' });
     }
+    setPromoBgUploadMeta(null);
     setShowPromoForm(true);
   };
 
-  const handleSavePromo = () => {
+  const handleSavePromo = async () => {
     if (!promoForm.sponsorName.trim()) {
       Alert.alert('Erro', 'Nome da empresa e obrigatorio');
       return;
@@ -3032,30 +3071,61 @@ export default function AdminPanel() {
     const minPurch = parseFloat(promoForm.minPurchase) || 100;
     const defaultMsg = `Parabéns! Quer ganhar 1 Pix de R$ ${couponVal.toFixed(2)}? Vá até a loja ${promoForm.sponsorName} e faça uma compra mínima de R$ ${minPurch.toFixed(2)} e ganhe um cupom para receber um Pix de R$ ${couponVal.toFixed(2)}!`;
 
-    const promo: PromotionalQR = {
-      id: editingPromo?.id ?? `promo_${Date.now()}`,
-      sponsorId: promoForm.sponsorId || `sp_promo_${Date.now()}`,
-      sponsorName: promoForm.sponsorName.trim(),
-      sponsorAddress: promoForm.sponsorAddress.trim(),
-      city: selectedCity,
-      state: cityState,
-      message: promoForm.message.trim() || defaultMsg,
-      couponValue: couponVal,
-      minPurchase: minPurch,
-      createdAt: editingPromo?.createdAt ?? new Date().toISOString(),
-      active: true,
-    };
+    let resolvedBackgroundImageUrl = promoForm.backgroundImageUrl.trim();
 
-    if (editingPromo) {
-      updatePromoQR(promo);
-      Alert.alert('Sucesso', `QR Promocional de ${promo.sponsorName} atualizado!`);
-    } else {
-      addPromoQR(promo);
-      Alert.alert('Sucesso', `QR Promocional de ${promo.sponsorName} criado!`);
+    try {
+      if (
+        resolvedBackgroundImageUrl &&
+        !resolvedBackgroundImageUrl.startsWith('http://') &&
+        !resolvedBackgroundImageUrl.startsWith('https://')
+      ) {
+        const uploadedImage = await uploadAdminImage({
+          folder: 'promo-qr-backgrounds',
+          itemId: editingPromo?.id ?? `${selectedCity}-${promoForm.sponsorName}`,
+          fileUri: resolvedBackgroundImageUrl,
+          fileName: promoBgUploadMeta?.fileName,
+          mimeType: promoBgUploadMeta?.mimeType,
+        });
+
+        resolvedBackgroundImageUrl = uploadedImage.publicUrl;
+      }
+
+      const promo: PromotionalQR = {
+        id: editingPromo?.id ?? `promo_${Date.now()}`,
+        sponsorId: promoForm.sponsorId || `sp_promo_${Date.now()}`,
+        sponsorName: promoForm.sponsorName.trim(),
+        sponsorAddress: promoForm.sponsorAddress.trim(),
+        backgroundImageUrl: resolvedBackgroundImageUrl || undefined,
+        city: selectedCity,
+        state: cityState,
+        message: promoForm.message.trim() || defaultMsg,
+        couponValue: couponVal,
+        minPurchase: minPurch,
+        createdAt: editingPromo?.createdAt ?? new Date().toISOString(),
+        active: true,
+      };
+
+      if (editingPromo) {
+        updatePromoQR(promo);
+        Alert.alert('Sucesso', `QR Promocional de ${promo.sponsorName} atualizado!`);
+      } else {
+        addPromoQR(promo);
+        Alert.alert('Sucesso', `QR Promocional de ${promo.sponsorName} criado!`);
+      }
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setPromoForm((prev) => ({ ...prev, backgroundImageUrl: resolvedBackgroundImageUrl }));
+      setPromoBgUploadMeta(null);
+      setShowPromoForm(false);
+      setEditingPromo(null);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Nao foi possivel salvar a foto de fundo do QR promocional';
+
+      if (isAdminImageBucketMissingError(error) || isAdminImageStoragePolicyError(error)) {
+        showAdminImageStorageSetupAlert(errorMessage);
+      } else {
+        Alert.alert('Falha ao salvar QR Promo', errorMessage);
+      }
     }
-    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setShowPromoForm(false);
-    setEditingPromo(null);
   };
 
   const handleCopyPromoQR = async (promo: PromotionalQR) => {
@@ -3065,6 +3135,7 @@ export default function AdminPanel() {
       sponsorId: promo.sponsorId,
       sponsorName: promo.sponsorName,
       sponsorAddress: promo.sponsorAddress,
+      backgroundImageUrl: promo.backgroundImageUrl,
       message: promo.message,
       couponValue: promo.couponValue,
       minPurchase: promo.minPurchase,
@@ -3089,6 +3160,7 @@ export default function AdminPanel() {
         sponsorId: promo.sponsorId,
         sponsorName: promo.sponsorName,
         sponsorAddress: promo.sponsorAddress,
+        backgroundImageUrl: promo.backgroundImageUrl,
         message: promo.message,
         couponValue: promo.couponValue,
         minPurchase: promo.minPurchase,
@@ -3248,6 +3320,30 @@ export default function AdminPanel() {
               </View>
 
               <View style={fm.section}>
+                <Text style={fm.sectionTitle}>Foto de Fundo do Card</Text>
+                <Text style={fm.sectionSub}>Essa imagem aparece para o usuario quando o QR promocional for escaneado.</Text>
+                <View style={fm.field}>
+                  <Text style={fm.label}>Imagem de Fundo</Text>
+                  <TouchableOpacity style={fm.uploadBtn} onPress={handlePickPromoBackground} activeOpacity={0.8}>
+                    {promoForm.backgroundImageUrl ? (
+                      <Image source={{ uri: promoForm.backgroundImageUrl }} style={fm.uploadPreview} contentFit="cover" contentPosition="center" />
+                    ) : (
+                      <View style={fm.uploadPlaceholder}>
+                        <ImageIcon size={28} color={Colors.dark.neonGreen} />
+                        <Text style={fm.uploadPlaceholderTxt}>Escolher foto de fundo</Text>
+                      </View>
+                    )}
+                    {promoForm.backgroundImageUrl ? (
+                      <View style={fm.uploadOverlay}>
+                        <ImageIcon size={14} color="#fff" />
+                        <Text style={fm.uploadOverlayTxt}>Trocar Foto</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={fm.section}>
                 <Text style={fm.sectionTitle}>Valores da Promocao</Text>
                 <View style={fm.row}>
                   <View style={[fm.field, { flex: 1 }]}>
@@ -3274,18 +3370,22 @@ export default function AdminPanel() {
                 <View style={fm.section}>
                   <Text style={fm.sectionTitle}>Preview da Mensagem</Text>
                   <View style={pq.previewCard}>
+                    {promoForm.backgroundImageUrl ? (
+                      <Image source={{ uri: promoForm.backgroundImageUrl }} style={pq.previewBg} contentFit="cover" contentPosition="center" />
+                    ) : null}
+                    {promoForm.backgroundImageUrl ? <LinearGradient colors={['rgba(0,0,0,0.12)', 'rgba(0,0,0,0.45)']} style={pq.previewBgOverlay} /> : null}
                     <Text style={pq.previewEmoji}>🎉</Text>
-                    <Text style={pq.previewText}>
+                    <Text style={[pq.previewText, promoForm.backgroundImageUrl ? pq.previewTextOnImage : null]}>
                       {promoForm.message.trim() || `Parabéns! Quer ganhar 1 Pix de R$ ${parseFloat(promoForm.couponValue || '10').toFixed(2)}? Vá até a loja ${promoForm.sponsorName} e faça uma compra mínima de R$ ${parseFloat(promoForm.minPurchase || '100').toFixed(2)} e ganhe um cupom para receber um Pix de R$ ${parseFloat(promoForm.couponValue || '10').toFixed(2)}!`}
                     </Text>
-                    <View style={pq.previewStore}>
+                    <View style={[pq.previewStore, promoForm.backgroundImageUrl ? pq.previewStoreOnImage : null]}>
                       <Store size={14} color={Colors.dark.neonGreen} />
-                      <Text style={pq.previewStoreName}>{promoForm.sponsorName}</Text>
+                      <Text style={[pq.previewStoreName, promoForm.backgroundImageUrl ? pq.previewStoreNameOnImage : null]}>{promoForm.sponsorName}</Text>
                     </View>
                     {promoForm.sponsorAddress.trim() ? (
-                      <View style={pq.previewAddr}>
-                        <MapPin size={12} color={Colors.dark.textMuted} />
-                        <Text style={pq.previewAddrText}>{promoForm.sponsorAddress}</Text>
+                      <View style={[pq.previewAddr, promoForm.backgroundImageUrl ? pq.previewAddrOnImage : null]}>
+                        <MapPin size={12} color={promoForm.backgroundImageUrl ? '#FFFFFF' : Colors.dark.textMuted} />
+                        <Text style={[pq.previewAddrText, promoForm.backgroundImageUrl ? pq.previewAddrTextOnImage : null]}>{promoForm.sponsorAddress}</Text>
                       </View>
                     ) : null}
                   </View>
@@ -4055,11 +4155,18 @@ const pq = StyleSheet.create({
   rowValues: { color: '#FFBE0B', fontSize: 11, fontWeight: '700' as const, marginTop: 3 },
   rowActions: { flexDirection: 'row', gap: 6 },
   actBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: Colors.dark.neonGreenFaint, alignItems: 'center', justifyContent: 'center' },
-  previewCard: { backgroundColor: 'rgba(255,190,11,0.06)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(255,190,11,0.15)', alignItems: 'center', gap: 8 },
+  previewCard: { backgroundColor: 'rgba(255,190,11,0.06)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(255,190,11,0.15)', alignItems: 'center', gap: 8, overflow: 'hidden' as const },
+  previewBg: { ...StyleSheet.absoluteFillObject },
+  previewBgOverlay: { ...StyleSheet.absoluteFillObject },
   previewEmoji: { fontSize: 32 },
   previewText: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const, lineHeight: 20, textAlign: 'center' as const },
+  previewTextOnImage: { color: '#FFFFFF', textShadowColor: 'rgba(0,0,0,0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
   previewStore: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  previewStoreOnImage: { backgroundColor: 'rgba(0,0,0,0.32)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'center' as const },
   previewStoreName: { color: Colors.dark.text, fontSize: 15, fontWeight: '700' as const },
+  previewStoreNameOnImage: { color: '#FFFFFF' },
   previewAddr: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  previewAddrOnImage: { backgroundColor: 'rgba(0,0,0,0.28)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'center' as const },
   previewAddrText: { color: Colors.dark.textMuted, fontSize: 12 },
+  previewAddrTextOnImage: { color: '#FFFFFF' },
 });
