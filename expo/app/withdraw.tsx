@@ -9,6 +9,13 @@ import { formatPixKeyValue } from '@/lib/formatters';
 import { hasPendingUserVerification, isUserVerificationApproved } from '@/lib/userVerification';
 import { useUser } from '@/providers/UserProvider';
 
+const WITHDRAW_THEME = {
+  textPrimary: '#F8FAFC',
+  textSecondary: 'rgba(226,232,240,0.84)',
+  textMuted: 'rgba(226,232,240,0.62)',
+  titleShadow: 'rgba(0,0,0,0.32)',
+};
+
 export default function WithdrawScreen() {
   console.log("[Withdraw] Withdraw screen initialized");
   const router = useRouter();
@@ -116,6 +123,11 @@ export default function WithdrawScreen() {
     <KeyboardAvoidingView style={w.ctr} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Stack.Screen options={{ title: 'Sacar PIX' }} />
       <View style={w.content}>
+        <View style={w.hdr}>
+          <Text style={w.ttl}>Sacar PIX</Text>
+          <Text style={w.sub}>Transfira seu saldo para uma chave cadastrada</Text>
+        </View>
+
         <View style={w.balCard}>
           <Text style={w.balLabel}>Saldo disponivel</Text>
           <Text style={w.balVal}>R$ {balance.toFixed(2)}</Text>
@@ -209,14 +221,17 @@ export default function WithdrawScreen() {
 }
 
 const w = StyleSheet.create({
-  ctr: { flex: 1, backgroundColor: Colors.dark.background },
+  ctr: { flex: 1, backgroundColor: 'transparent' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 20 },
+  hdr: { paddingBottom: 8 },
+  ttl: { fontSize: 30, fontWeight: '900' as const, letterSpacing: 0.3, color: WITHDRAW_THEME.textPrimary, textShadowColor: WITHDRAW_THEME.titleShadow, textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10 },
+  sub: { fontSize: 14, color: WITHDRAW_THEME.textSecondary, fontWeight: '600' as const, marginTop: 2 },
   balCard: { alignItems: 'center', backgroundColor: Colors.dark.card, borderRadius: 18, padding: 24, borderWidth: 1, borderColor: Colors.dark.neonGreenBorder, marginBottom: 20 },
-  balLabel: { color: Colors.dark.textMuted, fontSize: 13, fontWeight: '600' as const },
+  balLabel: { color: Colors.dark.textSecondary, fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' as const, letterSpacing: 0.8 },
   balVal: { color: Colors.dark.neonGreen, fontSize: 36, fontWeight: '900' as const, marginTop: 4 },
   warnCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,190,11,0.08)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(255,190,11,0.2)', marginBottom: 20 },
-  warnTxt: { color: Colors.dark.warning, fontSize: 13, flex: 1 },
-  inputLabel: { color: Colors.dark.textSecondary, fontSize: 13, fontWeight: '600' as const, marginBottom: 8 },
+  warnTxt: { color: Colors.dark.warning, fontSize: 13, fontWeight: '600' as const, lineHeight: 19, flex: 1 },
+  inputLabel: { color: WITHDRAW_THEME.textSecondary, fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' as const, letterSpacing: 0.8, marginBottom: 8 },
   inputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.card, borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.neonGreenBorder, paddingHorizontal: 16 },
   inputPrefix: { color: Colors.dark.neonGreen, fontSize: 20, fontWeight: '800' as const, marginRight: 8 },
   input: { flex: 1, color: Colors.dark.text, fontSize: 24, fontWeight: '800' as const, paddingVertical: 16 },
@@ -234,7 +249,7 @@ const w = StyleSheet.create({
   pixLockedCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,190,11,0.08)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(255,190,11,0.2)', marginBottom: 24 },
   pixLockedText: { color: Colors.dark.warning, fontSize: 13, fontWeight: '600' as const, flex: 1 },
   pixSection: { marginBottom: 24 },
-  pixSectionLabel: { color: Colors.dark.textSecondary, fontSize: 13, fontWeight: '600' as const, marginBottom: 10 },
+  pixSectionLabel: { color: WITHDRAW_THEME.textSecondary, fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' as const, letterSpacing: 0.8, marginBottom: 10 },
   pixKeyScroll: { flexGrow: 0 },
   pixKeyScrollContent: { gap: 10, paddingRight: 4 },
   pixKeyChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.dark.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1.5, borderColor: Colors.dark.neonGreenBorder },
@@ -251,10 +266,10 @@ const w = StyleSheet.create({
   btnT: { color: '#000', fontSize: 16, fontWeight: '900' as const, letterSpacing: 0.5 },
   successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   successIcon: { marginBottom: 20 },
-  successTtl: { color: Colors.dark.neonGreen, fontSize: 24, fontWeight: '800' as const },
+  successTtl: { color: Colors.dark.neonGreen, fontSize: 26, fontWeight: '900' as const, letterSpacing: 0.2 },
   successVal: { color: Colors.dark.text, fontSize: 40, fontWeight: '900' as const, marginTop: 8 },
-  successDesc: { color: Colors.dark.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 16, lineHeight: 20 },
-  successPix: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 8 },
+  successDesc: { color: Colors.dark.textSecondary, fontSize: 14, fontWeight: '600' as const, textAlign: 'center', marginTop: 16, lineHeight: 20 },
+  successPix: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '600' as const, marginTop: 8 },
   successBtn: { width: '100%', borderRadius: 14, overflow: 'hidden', marginTop: 32 },
   successBtnG: { paddingVertical: 16, alignItems: 'center' },
   successBtnT: { color: '#000', fontSize: 16, fontWeight: '800' as const },

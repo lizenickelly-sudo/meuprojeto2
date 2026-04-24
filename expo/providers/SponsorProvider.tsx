@@ -33,15 +33,84 @@ const SPONSOR_CACHE_KEYS = {
   SPONSOR_STARS: 'sponsor_stars',
 } as const;
 
+function normalizeUserRatingKey(value?: string): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function clampSponsorRating(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.min(5, Math.round(value)));
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.min(5, Math.round(parsed)));
+    }
+  }
+
+  return 0;
+}
+
+function getSponsorRatingsByUser(sponsor?: Sponsor): Record<string, number> {
+  if (!sponsor?.ratingsByUser) return {};
+
+  return Object.entries(sponsor.ratingsByUser).reduce<Record<string, number>>((acc, [userKey, rawRating]) => {
+    const normalizedKey = normalizeUserRatingKey(userKey);
+    const normalizedRating = clampSponsorRating(rawRating);
+
+    if (normalizedKey && normalizedRating > 0) {
+      acc[normalizedKey] = normalizedRating;
+    }
+
+    return acc;
+  }, {});
+}
+
+function getSponsorRatingSummary(ratingsByUser: Record<string, number>) {
+  const ratings = Object.values(ratingsByUser).filter((value) => value > 0);
+  const count = ratings.length;
+  const total = ratings.reduce((sum, value) => sum + value, 0);
+  const average = count > 0 ? Number((total / count).toFixed(1)) : 0;
+
+  return {
+    count,
+    total,
+    average,
+  };
+}
+
+function withSponsorRatingSummary(sponsor: Sponsor, ratingsByUser: Record<string, number>): Sponsor {
+  const summary = getSponsorRatingSummary(ratingsByUser);
+
+  return {
+    ...sponsor,
+    ratingsByUser,
+    ratingCount: summary.count,
+    ratingTotal: summary.total,
+    ratingAverage: summary.average,
+  };
+}
+
+function getScopedStateKey(baseKey: string, scope?: string): string {
+  const normalizedScope = normalizeUserRatingKey(scope);
+  return normalizedScope ? `${baseKey}:${normalizedScope}` : baseKey;
+}
+
 export const [SponsorProvider, useSponsor] = createContextHook(() => {
   const queryClient = useQueryClient();
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, userEmail } = useAuth();
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [likedOffers, setLikedOffers] = useState<string[]>([]);
   const [sharedOffers, setSharedOffers] = useState<string[]>([]);
   const [likedSponsors, setLikedSponsors] = useState<string[]>([]);
   const [starredSponsors, setStarredSponsors] = useState<string[]>([]);
   const [sponsorStars, setSponsorStars] = useState<Record<string, number>>({});
+  const ratingUserKey = normalizeUserRatingKey(userEmail);
+  const starredSponsorsStorageKey = getScopedStateKey(STORAGE_KEYS.STARRED_SPONSORS, ratingUserKey);
+  const sponsorStarsStorageKey = getScopedStateKey(STORAGE_KEYS.SPONSOR_STARS, ratingUserKey);
+  const starredSponsorsCacheKey = getScopedStateKey(SPONSOR_CACHE_KEYS.STARRED_SPONSORS, ratingUserKey);
+  const sponsorStarsCacheKey = getScopedStateKey(SPONSOR_CACHE_KEYS.SPONSOR_STARS, ratingUserKey);
 
   const sponsorsQuery = useQuery({
     queryKey: ['sponsors'],
@@ -117,14 +186,16 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   });
 
   const starredSponsorsQuery = useQuery({
-    queryKey: ['starred_sponsors'],
+    queryKey: ['starred_sponsors', ratingUserKey],
     queryFn: async () => {
-      const cached = await readDomainCache<string[]>('sponsor', SPONSOR_CACHE_KEYS.STARRED_SPONSORS, SPONSOR_CACHE_TTL_MS);
+      if (!ratingUserKey) return [];
+
+      const cached = await readDomainCache<string[]>('sponsor', starredSponsorsCacheKey, SPONSOR_CACHE_TTL_MS);
       if (cached) return cached;
 
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.STARRED_SPONSORS);
+      const stored = await AsyncStorage.getItem(starredSponsorsStorageKey);
       const value = stored ? JSON.parse(stored) as string[] : [];
-      await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.STARRED_SPONSORS, value);
+      await writeDomainCache('sponsor', starredSponsorsCacheKey, value);
       return value;
     },
     staleTime: 0,
@@ -132,14 +203,16 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   });
 
   const sponsorStarsQuery = useQuery({
-    queryKey: ['sponsor_stars'],
+    queryKey: ['sponsor_stars', ratingUserKey],
     queryFn: async () => {
-      const cached = await readDomainCache<Record<string, number>>('sponsor', SPONSOR_CACHE_KEYS.SPONSOR_STARS, SPONSOR_CACHE_TTL_MS);
+      if (!ratingUserKey) return {};
+
+      const cached = await readDomainCache<Record<string, number>>('sponsor', sponsorStarsCacheKey, SPONSOR_CACHE_TTL_MS);
       if (cached) return cached;
 
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.SPONSOR_STARS);
+      const stored = await AsyncStorage.getItem(sponsorStarsStorageKey);
       const value = stored ? JSON.parse(stored) as Record<string, number> : {};
-      await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSOR_STARS, value);
+      await writeDomainCache('sponsor', sponsorStarsCacheKey, value);
       return value;
     },
     staleTime: 0,
@@ -258,8 +331,8 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
 
   const saveStarredSponsorsMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.STARRED_SPONSORS, JSON.stringify(ids));
-      await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.STARRED_SPONSORS, ids);
+      await AsyncStorage.setItem(starredSponsorsStorageKey, JSON.stringify(ids));
+      await writeDomainCache('sponsor', starredSponsorsCacheKey, ids);
       return ids;
     },
     onSuccess: (data) => {
@@ -270,8 +343,8 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
 
   const saveSponsorStarsMutation = useMutation({
     mutationFn: async (stars: Record<string, number>) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.SPONSOR_STARS, JSON.stringify(stars));
-      await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.SPONSOR_STARS, stars);
+      await AsyncStorage.setItem(sponsorStarsStorageKey, JSON.stringify(stars));
+      await writeDomainCache('sponsor', sponsorStarsCacheKey, stars);
       return stars;
     },
     onSuccess: (data) => {
@@ -279,6 +352,31 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
       queryClient.invalidateQueries({ queryKey: ['sponsor_stars'] });
     },
   });
+
+  useEffect(() => {
+    if (!ratingUserKey || sponsors.length === 0 || Object.keys(sponsorStars).length === 0) return;
+
+    let changed = false;
+    const updatedSponsors = sponsors.map((sponsor) => {
+      const localStars = clampSponsorRating(sponsorStars[sponsor.id] || 0);
+      if (localStars === 0) return sponsor;
+
+      const ratingsByUser = getSponsorRatingsByUser(sponsor);
+      if (ratingsByUser[ratingUserKey] === localStars) return sponsor;
+
+      changed = true;
+      return withSponsorRatingSummary(sponsor, {
+        ...ratingsByUser,
+        [ratingUserKey]: localStars,
+      });
+    });
+
+    if (!changed) return;
+
+    setSponsors(updatedSponsors);
+    queryClient.setQueryData(['sponsors'], updatedSponsors);
+    saveSponsorsMutation.mutate(updatedSponsors);
+  }, [queryClient, ratingUserKey, saveSponsorsMutation, sponsorStars, sponsors]);
 
   const bumpOfferCounter = useCallback((offerId: string, field: 'likes' | 'shares' | 'comments') => {
     let changed = false;
@@ -379,36 +477,91 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     return !alreadyLiked;
   }, [likedSponsors, saveLikedSponsorsMutation]);
 
-  const toggleSponsorStar = useCallback((sponsorId: string): boolean => {
-    const alreadyStarred = starredSponsors.includes(sponsorId);
-    const updatedStarred = alreadyStarred
-      ? starredSponsors.filter((id) => id !== sponsorId)
-      : [...starredSponsors, sponsorId];
+  const toggleSponsorStar = useCallback((sponsorId: string, nextStars?: number): boolean => {
+    if (!ratingUserKey) return false;
 
-    const currentStars = sponsorStars[sponsorId] || 0;
-    const nextStars = alreadyStarred ? Math.max(0, currentStars - 1) : currentStars + 1;
-    const updatedStars = {
-      ...sponsorStars,
-      [sponsorId]: nextStars,
-    };
+    const targetSponsor = sponsors.find((item) => item.id === sponsorId);
+    if (!targetSponsor) return false;
 
+    const ratingsByUser = getSponsorRatingsByUser(targetSponsor);
+    const currentStars = ratingsByUser[ratingUserKey] || clampSponsorRating(sponsorStars[sponsorId] || 0);
+    const alreadyStarred = currentStars > 0 || starredSponsors.includes(sponsorId);
+    const clampedStars = typeof nextStars === 'number' && Number.isFinite(nextStars)
+      ? clampSponsorRating(nextStars)
+      : (alreadyStarred ? 0 : Math.max(1, currentStars || 1));
+
+    const updatedStarred = clampedStars > 0
+      ? (alreadyStarred ? starredSponsors : [...starredSponsors, sponsorId])
+      : starredSponsors.filter((id) => id !== sponsorId);
+    const updatedStars = { ...sponsorStars };
+    const updatedRatingsByUser = { ...ratingsByUser };
+
+    if (clampedStars > 0) {
+      updatedRatingsByUser[ratingUserKey] = clampedStars;
+    } else {
+      delete updatedRatingsByUser[ratingUserKey];
+    }
+
+    const updatedSponsors = sponsors.map((sponsor) => (
+      sponsor.id === sponsorId ? withSponsorRatingSummary(sponsor, updatedRatingsByUser) : sponsor
+    ));
+
+    if (clampedStars > 0) {
+      updatedStars[sponsorId] = clampedStars;
+    } else {
+      delete updatedStars[sponsorId];
+    }
+
+    setSponsors(updatedSponsors);
+    queryClient.setQueryData(['sponsors'], updatedSponsors);
+    saveSponsorsMutation.mutate(updatedSponsors);
     saveStarredSponsorsMutation.mutate(updatedStarred);
     saveSponsorStarsMutation.mutate(updatedStars);
 
-    return !alreadyStarred;
-  }, [starredSponsors, sponsorStars, saveStarredSponsorsMutation, saveSponsorStarsMutation]);
+    return clampedStars > 0;
+  }, [queryClient, ratingUserKey, saveSponsorStarsMutation, saveSponsorsMutation, saveStarredSponsorsMutation, sponsorStars, sponsors, starredSponsors]);
 
   const isSponsorLiked = useCallback((sponsorId: string) => {
     return likedSponsors.includes(sponsorId);
   }, [likedSponsors]);
 
-  const isSponsorStarred = useCallback((sponsorId: string) => {
-    return starredSponsors.includes(sponsorId);
-  }, [starredSponsors]);
-
   const getSponsorStars = useCallback((sponsorId: string) => {
-    return sponsorStars[sponsorId] || 0;
-  }, [sponsorStars]);
+    const sponsor = sponsors.find((item) => item.id === sponsorId);
+    if (!sponsor) return clampSponsorRating(sponsorStars[sponsorId] || 0);
+
+    const ratingsByUser = getSponsorRatingsByUser(sponsor);
+    if (ratingUserKey && ratingsByUser[ratingUserKey] > 0) {
+      return ratingsByUser[ratingUserKey];
+    }
+
+    return clampSponsorRating(sponsorStars[sponsorId] || 0);
+  }, [ratingUserKey, sponsorStars, sponsors]);
+
+  const isSponsorStarred = useCallback((sponsorId: string) => {
+    return starredSponsors.includes(sponsorId) || getSponsorStars(sponsorId) > 0;
+  }, [getSponsorStars, starredSponsors]);
+
+  const getSponsorAverageStars = useCallback((sponsorId: string) => {
+    const sponsor = sponsors.find((item) => item.id === sponsorId);
+    if (!sponsor) return 0;
+
+    const ratingAverage = typeof sponsor.ratingAverage === 'number' && Number.isFinite(sponsor.ratingAverage)
+      ? sponsor.ratingAverage
+      : getSponsorRatingSummary(getSponsorRatingsByUser(sponsor)).average;
+
+    return Number(ratingAverage.toFixed(1));
+  }, [sponsors]);
+
+  const getSponsorRatingCount = useCallback((sponsorId: string) => {
+    const sponsor = sponsors.find((item) => item.id === sponsorId);
+    if (!sponsor) return 0;
+
+    if (typeof sponsor.ratingCount === 'number' && Number.isFinite(sponsor.ratingCount)) {
+      return sponsor.ratingCount;
+    }
+
+    return getSponsorRatingSummary(getSponsorRatingsByUser(sponsor)).count;
+  }, [sponsors]);
 
   const sponsorsByCity = useMemo(() => {
     const map: Record<string, Sponsor[]> = {};
@@ -453,6 +606,8 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     isSponsorLiked,
     isSponsorStarred,
     getSponsorStars,
+    getSponsorAverageStars,
+    getSponsorRatingCount,
     likedOffers,
     sharedOffers,
     likedSponsors,

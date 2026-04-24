@@ -34,7 +34,7 @@ export default function TabLayout() {
 
   if (!isReady) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' }}>
         <ActivityIndicator size="large" color={Colors.dark.primary} />
       </View>
     );
@@ -48,10 +48,13 @@ export default function TabLayout() {
     <View style={styles.container}>
       <Tabs
         screenOptions={{
+          sceneStyle: {
+            backgroundColor: 'transparent',
+          },
           tabBarActiveTintColor: Colors.dark.primary,
           tabBarInactiveTintColor: Colors.dark.textMuted,
           tabBarStyle: {
-            backgroundColor: '#FFFFFF',
+            backgroundColor: 'rgba(255,255,255,0.78)',
             borderTopColor: 'rgba(0,0,0,0.06)',
             borderTopWidth: 1,
             overflow: 'visible',
@@ -139,6 +142,7 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   helpButton: {
     position: 'absolute',

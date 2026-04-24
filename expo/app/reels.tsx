@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, AppStateStatus, FlatList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { AppState, AppStateStatus, FlatList, InteractionManager, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -25,11 +25,18 @@ function normalizeText(value?: string): string {
     .toLowerCase();
 }
 
+function getRandomIndex(length: number): number {
+  if (length <= 1) return 0;
+  return Math.floor(Math.random() * length);
+}
+
 export default function ReelsScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
+  const listRef = useRef<FlatList<ReelEntry> | null>(null);
+  const hasFocusedRef = useRef(false);
   const { sponsors } = useSponsor();
   const { profile } = useUser();
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -103,6 +110,25 @@ export default function ReelsScreen() {
     }
   }).current;
 
+  useEffect(() => {
+    if (!isFocused) {
+      hasFocusedRef.current = false;
+      return;
+    }
+
+    if (hasFocusedRef.current || reels.length === 0) return;
+
+    hasFocusedRef.current = true;
+    const randomIndex = getRandomIndex(reels.length);
+    setActiveIndex(randomIndex);
+
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      listRef.current?.scrollToIndex({ index: randomIndex, animated: false });
+    });
+
+    return () => interaction.cancel();
+  }, [isFocused, reels.length]);
+
   if (!normalizedCity) {
     return (
       <View style={s.emptyScreen}>
@@ -146,6 +172,7 @@ export default function ReelsScreen() {
       <StatusBar style="light" />
 
       <FlatList
+        ref={listRef}
         data={reels}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
@@ -188,7 +215,7 @@ export default function ReelsScreen() {
 const s = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#050505',
+    backgroundColor: 'transparent',
   },
   topBar: {
     position: 'absolute',
@@ -229,7 +256,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 28,
-    backgroundColor: '#050505',
+    backgroundColor: 'transparent',
   },
   emptyEyebrow: {
     color: Colors.dark.primary,

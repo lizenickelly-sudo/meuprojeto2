@@ -517,8 +517,48 @@ function SponsorFormModal({
       Alert.alert('Erro', 'Categoria e obrigatoria');
       return;
     }
-    onSave(form);
-  }, [form, onSave, uploadingVideo]);
+
+    const hasPendingOfferDraft = Boolean(
+      editingOfferIdx !== null ||
+      offerTitle.trim() ||
+      offerDesc.trim() ||
+      offerDiscount.trim() ||
+      offerImageUrl.trim()
+    );
+
+    if (!hasPendingOfferDraft) {
+      onSave(form);
+      return;
+    }
+
+    if (!offerTitle.trim()) {
+      Alert.alert('Erro', 'Titulo da promocao e obrigatorio');
+      return;
+    }
+
+    const nextOffers = [...form.offers];
+    const nextOffer: OfferFormItem = {
+      id: editingOfferIdx !== null ? nextOffers[editingOfferIdx].id : `offer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: offerTitle.trim(),
+      description: offerDesc.trim(),
+      discount: offerDiscount.trim(),
+      imageUrl: offerImageUrl.trim(),
+    };
+
+    if (editingOfferIdx !== null) {
+      nextOffers[editingOfferIdx] = {
+        ...nextOffers[editingOfferIdx],
+        ...nextOffer,
+      };
+    } else {
+      nextOffers.push(nextOffer);
+    }
+
+    onSave({
+      ...form,
+      offers: nextOffers,
+    });
+  }, [editingOfferIdx, form, offerDesc, offerDiscount, offerImageUrl, offerTitle, onSave, uploadingVideo]);
 
   const resetOfferFields = useCallback(() => {
     setEditingOfferIdx(null);
@@ -959,7 +999,7 @@ function SponsorFormModal({
 }
 
 const fm = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12, backgroundColor: Colors.dark.surface, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
   closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: Colors.dark.text, fontSize: 17, fontWeight: '700' as const },
@@ -1481,7 +1521,7 @@ function CouponPreviewModal({
 }
 
 const cp = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.dark.surface, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
   closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: Colors.dark.text, fontSize: 16, fontWeight: '700' as const, flex: 1, textAlign: 'center' as const },
@@ -1598,7 +1638,7 @@ function PromoQRPreviewModal({
 }
 
 const pqm = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.dark.surface, borderBottomWidth: 1, borderBottomColor: Colors.dark.cardBorder },
   closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.dark.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: Colors.dark.text, fontSize: 16, fontWeight: '700' as const, flex: 1, textAlign: 'center' as const },
@@ -3960,10 +4000,10 @@ export default function AdminPanel() {
 }
 
 const a = StyleSheet.create({
-  ctr: { flex: 1, backgroundColor: Colors.dark.background },
+  ctr: { flex: 1, backgroundColor: 'transparent' },
   bgGrad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   sc: { paddingBottom: 20 },
-  denied: { flex: 1, backgroundColor: Colors.dark.background, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  denied: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', padding: 32 },
   deniedTtl: { color: Colors.dark.text, fontSize: 22, fontWeight: '700' as const, marginTop: 16 },
   deniedSub: { color: Colors.dark.textSecondary, fontSize: 14, textAlign: 'center' as const, marginTop: 8 },
   hdrBanner: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, overflow: 'hidden', shadowColor: "#00FF87", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 12, elevation: 6 },

@@ -7,6 +7,7 @@ import { CheckCircle, XCircle, Clock, Camera, FlashlightOff, Flashlight, Refresh
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Colors from '@/constants/colors';
+import { useScrollToTopOnFocus } from '@/lib/useScrollToTopOnFocus';
 import { useUser } from '@/providers/UserProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useCoupon } from '@/providers/CouponProvider';
@@ -44,11 +45,11 @@ function CouponRow({ coupon }: { coupon: Coupon }) {
 }
 
 const cr = StyleSheet.create({
-  item: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
-  iconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: Colors.dark.primaryFaint, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  item: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(8,12,24,0.76)', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  iconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(249,115,22,0.16)', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   info: { flex: 1 },
-  sp: { color: Colors.dark.text, fontSize: 14, fontWeight: '700' as const },
-  dt: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 3 },
+  sp: { color: '#F8FAFC', fontSize: 14, fontWeight: '700' as const },
+  dt: { color: 'rgba(226,232,240,0.72)', fontSize: 11, marginTop: 3 },
   rt: { alignItems: 'flex-end', gap: 6, marginLeft: 8 },
   val: { fontSize: 15, fontWeight: '800' as const },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
@@ -198,6 +199,7 @@ function NativeScanner({ onScan, isScanning }: { onScan: (data: string) => void;
 export default function ScannerScreen() {
   console.log("[ScannerScreen] Scanner screen initialized");
   const ins = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView | null>(null);
   const { coupons, addCouponRaw, addScannedMessage, markCodeRedeemed, isCodeRedeemed } = useCoupon();
   const { sponsors: allSponsors } = useSponsor();
   const { addBalance, addTransaction } = useUser();
@@ -396,9 +398,11 @@ export default function ScannerScreen() {
 
   const recentCoupons = coupons.slice(0, 10);
 
+  useScrollToTopOnFocus(scrollRef);
+
   return (
     <View style={sc.ctr}>
-      <ScrollView style={sc.scrollRoot} showsVerticalScrollIndicator={false} contentContainerStyle={sc.scrollContent}
+      <ScrollView ref={scrollRef} style={sc.scrollRoot} showsVerticalScrollIndicator={false} contentContainerStyle={sc.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); setTimeout(() => setRefreshing(false), 1500); }} tintColor={Colors.dark.primary} colors={[Colors.dark.primary]} />}
       >
         <View style={{ paddingTop: ins.top }}>
@@ -525,48 +529,47 @@ const cam = StyleSheet.create({
 });
 
 const sc = StyleSheet.create({
-  ctr: { flex: 1, backgroundColor: '#FFFFFF' },
-  bgGrad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  ctr: { flex: 1, backgroundColor: 'transparent' },
   scrollRoot: { flex: 1 },
   scrollContent: { paddingBottom: 20 },
   hdr: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
-  ttl: { fontSize: 28, fontWeight: '800' as const, color: Colors.dark.text },
-  sub: { fontSize: 13, color: Colors.dark.textSecondary, marginTop: 2 },
-  area: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, overflow: 'hidden', height: 220, borderWidth: 1, borderColor: 'rgba(249,115,22,0.15)' },
-  aGrad: { flex: 1, backgroundColor: '#F8F9FA', alignItems: 'center', justifyContent: 'center' },
+  ttl: { fontSize: 28, fontWeight: '800' as const, color: '#F8FAFC', textShadowColor: 'rgba(0,0,0,0.45)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10 },
+  sub: { fontSize: 13, color: 'rgba(226,232,240,0.82)', marginTop: 2 },
+  area: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, overflow: 'hidden', height: 220, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', backgroundColor: 'rgba(8,12,24,0.28)' },
+  aGrad: { flex: 1, backgroundColor: 'rgba(8,12,24,0.4)', alignItems: 'center', justifyContent: 'center' },
   frame: { width: 160, height: 130, alignItems: 'center', justifyContent: 'center', position: 'relative' as const },
-  corner: { position: 'absolute', width: 24, height: 24, borderColor: '#F97316', borderWidth: 3 },
+  corner: { position: 'absolute', width: 24, height: 24, borderColor: '#F8FAFC', borderWidth: 3 },
   cTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 6 },
   cTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 6 },
   cBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 6 },
   cBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 6 },
-  line: { position: 'absolute', left: 10, right: 10, height: 2, backgroundColor: '#F97316' },
-  hint: { color: Colors.dark.text, fontSize: 14, fontWeight: '600' as const, marginTop: 16 },
-  hintS: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 4 },
-  permBox: { marginHorizontal: 16, marginTop: 12, backgroundColor: '#FFFFFF', borderRadius: 20, padding: 28, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
-  permTitle: { color: Colors.dark.text, fontSize: 18, fontWeight: '700' as const, marginTop: 12 },
-  permTxt: { color: Colors.dark.textSecondary, fontSize: 13, textAlign: 'center' as const, marginTop: 8 },
+  line: { position: 'absolute', left: 10, right: 10, height: 2, backgroundColor: '#60A5FA' },
+  hint: { color: '#F8FAFC', fontSize: 14, fontWeight: '600' as const, marginTop: 16 },
+  hintS: { color: 'rgba(226,232,240,0.72)', fontSize: 11, marginTop: 4 },
+  permBox: { marginHorizontal: 16, marginTop: 12, backgroundColor: 'rgba(8,12,24,0.72)', borderRadius: 20, padding: 28, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  permTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '700' as const, marginTop: 12 },
+  permTxt: { color: 'rgba(226,232,240,0.8)', fontSize: 13, textAlign: 'center' as const, marginTop: 8 },
   permBtn: { borderRadius: 14, overflow: 'hidden', marginTop: 20, width: '100%' },
   permBtnG: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
   permBtnT: { color: '#FFF', fontSize: 14, fontWeight: '800' as const },
   settingsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
   settingsBtnTxt: { color: Colors.dark.primary, fontSize: 13, fontWeight: '600' as const },
   simBtn: { marginTop: 14 },
-  simBtnTxt: { color: Colors.dark.textMuted, fontSize: 12, fontWeight: '500' as const },
-  typeBanner: { flexDirection: 'row', marginHorizontal: 16, marginTop: 16, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  simBtnTxt: { color: 'rgba(226,232,240,0.78)', fontSize: 12, fontWeight: '500' as const },
+  typeBanner: { flexDirection: 'row', marginHorizontal: 16, marginTop: 16, backgroundColor: 'rgba(8,12,24,0.72)', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   typeItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   typeIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   typeInfo: { flex: 1 },
-  typeTitle: { color: Colors.dark.text, fontSize: 12, fontWeight: '700' as const },
-  typeDesc: { color: Colors.dark.textMuted, fontSize: 10, marginTop: 1 },
-  typeDivider: { width: 1, backgroundColor: Colors.dark.cardBorder, marginHorizontal: 8 },
+  typeTitle: { color: '#F8FAFC', fontSize: 12, fontWeight: '700' as const },
+  typeDesc: { color: 'rgba(226,232,240,0.72)', fontSize: 10, marginTop: 1 },
+  typeDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginHorizontal: 8 },
   cHdr: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginTop: 20, marginBottom: 10 },
-  cTtl: { color: Colors.dark.text, fontSize: 17, fontWeight: '700' as const },
+  cTtl: { color: '#F8FAFC', fontSize: 17, fontWeight: '700' as const },
   list: { paddingHorizontal: 16 },
   empty: { alignItems: 'center', paddingVertical: 30, gap: 8 },
-  eTtl: { color: Colors.dark.textSecondary, fontSize: 16, fontWeight: '600' as const },
-  eSub: { color: Colors.dark.textMuted, fontSize: 13, textAlign: 'center' as const, paddingHorizontal: 40 },
-  moreTxt: { color: Colors.dark.textMuted, fontSize: 12, textAlign: 'center' as const, marginTop: 8 },
+  eTtl: { color: '#E2E8F0', fontSize: 16, fontWeight: '600' as const },
+  eSub: { color: 'rgba(226,232,240,0.72)', fontSize: 13, textAlign: 'center' as const, paddingHorizontal: 40 },
+  moreTxt: { color: 'rgba(226,232,240,0.72)', fontSize: 12, textAlign: 'center' as const, marginTop: 8 },
 });
 
 const md = StyleSheet.create({

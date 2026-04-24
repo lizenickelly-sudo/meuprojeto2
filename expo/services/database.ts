@@ -140,6 +140,35 @@ function toFiniteNumber(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function normalizeSponsorRatingsByUser(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object') return {};
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, rawValue]) => {
+    const normalizedKey = normalizeEmail(String(key || ''));
+    if (!normalizedKey) return acc;
+
+    const normalizedRating = Math.max(1, Math.min(5, Math.round(toFiniteNumber(rawValue, 0))));
+    if (normalizedRating > 0) {
+      acc[normalizedKey] = normalizedRating;
+    }
+
+    return acc;
+  }, {});
+}
+
+function buildSponsorRatingSummary(ratingsByUser: Record<string, number>) {
+  const ratings = Object.values(ratingsByUser).filter((value) => Number.isFinite(value) && value > 0);
+  const ratingCount = ratings.length;
+  const ratingTotal = ratings.reduce((sum, value) => sum + value, 0);
+  const ratingAverage = ratingCount > 0 ? Number((ratingTotal / ratingCount).toFixed(1)) : 0;
+
+  return {
+    ratingCount,
+    ratingTotal,
+    ratingAverage,
+  };
+}
+
 function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
   const data = toRecord(row.data);
   const sponsorId = row.id || String(data.id || '');
@@ -148,6 +177,8 @@ function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
   const state = row.state ?? String(data.state || '');
   const imageUrl = String(data.imageUrl || row.thumbnail_url || data.logoUrl || '');
   const logoUrl = String(data.logoUrl || row.thumbnail_url || data.imageUrl || '');
+  const ratingsByUser = normalizeSponsorRatingsByUser(data.ratingsByUser);
+  const ratingSummary = buildSponsorRatingSummary(ratingsByUser);
   const promotionalVideos = Array.isArray(data.promotionalVideos)
     ? data.promotionalVideos
     : row.video_url
@@ -175,6 +206,10 @@ function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
     stories: Array.isArray(data.stories) ? data.stories as Sponsor['stories'] : [],
     galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages as Sponsor['galleryImages'] : [],
     promotionalVideos: promotionalVideos as Sponsor['promotionalVideos'],
+    ratingsByUser,
+    ratingAverage: ratingSummary.ratingAverage,
+    ratingCount: ratingSummary.ratingCount,
+    ratingTotal: ratingSummary.ratingTotal,
   };
 }
 

@@ -22,6 +22,16 @@ import { useRouter } from 'expo-router';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
+const LOGIN_THEME = {
+  textPrimary: '#F8FAFC',
+  textSecondary: 'rgba(226,232,240,0.84)',
+  textMuted: 'rgba(226,232,240,0.62)',
+  titleShadow: 'rgba(0,0,0,0.32)',
+  cardTitle: '#0F172A',
+  cardSecondary: '#475569',
+  cardLabel: 'rgba(15,23,42,0.68)',
+};
+
 export default function LoginScreen() {
   console.log('[LoginScreen] Login screen initialized');
   const insets = useSafeAreaInsets();
@@ -141,11 +151,13 @@ export default function LoginScreen() {
           <Text style={s.formTitle}>{isRegisterMode ? 'Criar Conta' : 'Entrar'}</Text>
           <Text style={s.formSubtitle}>{isRegisterMode ? 'Preencha seus dados para começar' : 'Acesse sua conta para continuar'}</Text>
 
+          <Text style={s.fieldLabel}>E-mail</Text>
           <View style={s.inputWrap}>
             <View style={s.inputIcon}><Mail size={18} color={Colors.dark.textMuted} /></View>
             <TextInput style={s.input} value={email} onChangeText={setEmail} placeholder="seu@email.com" placeholderTextColor={Colors.dark.textMuted} keyboardType="email-address" autoCapitalize="none" autoComplete="email" testID="login-email" />
           </View>
 
+          <Text style={s.fieldLabel}>Senha</Text>
           <View style={s.inputWrap}>
             <View style={s.inputIcon}><Lock size={18} color={Colors.dark.textMuted} /></View>
             <TextInput style={s.input} value={password} onChangeText={setPassword} placeholder="Sua senha" placeholderTextColor={Colors.dark.textMuted} secureTextEntry={!showPassword} autoCapitalize="none" testID="login-password" />
@@ -155,10 +167,13 @@ export default function LoginScreen() {
           </View>
 
           {isRegisterMode && (
-            <View style={s.inputWrap}>
-              <View style={s.inputIcon}><Lock size={18} color={Colors.dark.textMuted} /></View>
-              <TextInput style={s.input} value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirmar senha" placeholderTextColor={Colors.dark.textMuted} secureTextEntry={!showPassword} autoCapitalize="none" testID="login-confirm-password" />
-            </View>
+            <>
+              <Text style={s.fieldLabel}>Confirmar senha</Text>
+              <View style={s.inputWrap}>
+                <View style={s.inputIcon}><Lock size={18} color={Colors.dark.textMuted} /></View>
+                <TextInput style={s.input} value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirmar senha" placeholderTextColor={Colors.dark.textMuted} secureTextEntry={!showPassword} autoCapitalize="none" testID="login-confirm-password" />
+              </View>
+            </>
           )}
 
           {displayError && <View style={s.errorBox}><Text style={s.errorText}>{displayError}</Text></View>}
@@ -198,19 +213,20 @@ export default function LoginScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  bgFill: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: Colors.dark.background },
+  bgFill: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' },
   particles: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
   particle: { position: 'absolute' as const, borderRadius: 50, backgroundColor: '#F97316' },
   scroll: { alignItems: 'center', paddingHorizontal: 24 },
   logoWrap: { alignItems: 'center', marginBottom: 16 },
   glowRing: { position: 'absolute' as const, width: 130, height: 130, borderRadius: 65, backgroundColor: '#F97316', top: -10, left: -10 },
   logo: { width: 110, height: 110, borderRadius: 16 },
-  titleWrap: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 32 },
-  title: { fontSize: 24, fontWeight: '300' as const, color: Colors.dark.textSecondary },
-  titleAccent: { fontSize: 28, fontWeight: '900' as const, color: Colors.dark.primary },
+  titleWrap: { alignItems: 'center', marginBottom: 32 },
+  title: { fontSize: 30, fontWeight: '800' as const, letterSpacing: 0.3, color: LOGIN_THEME.textPrimary, textShadowColor: LOGIN_THEME.titleShadow, textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10 },
+  titleAccent: { fontSize: 16, fontWeight: '900' as const, letterSpacing: 4, color: Colors.dark.primary, marginTop: 2 },
   formCard: { width: '100%', maxWidth: 400, backgroundColor: '#FFFFFF', borderRadius: 24, padding: 28, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 16, elevation: 6 },
-  formTitle: { fontSize: 22, fontWeight: '800' as const, color: Colors.dark.text, marginBottom: 4 },
-  formSubtitle: { fontSize: 13, color: Colors.dark.textMuted, marginBottom: 24 },
+  formTitle: { fontSize: 26, fontWeight: '800' as const, letterSpacing: 0.2, color: LOGIN_THEME.cardTitle, marginBottom: 4 },
+  formSubtitle: { fontSize: 13, color: LOGIN_THEME.cardSecondary, fontWeight: '600' as const, lineHeight: 19, marginBottom: 22 },
+  fieldLabel: { color: LOGIN_THEME.cardLabel, fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' as const, letterSpacing: 0.8, marginBottom: 6 },
   inputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.inputBg, borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder, marginBottom: 14, overflow: 'hidden' },
   inputIcon: { paddingLeft: 14, paddingRight: 4 },
   input: { flex: 1, paddingVertical: 14, paddingHorizontal: 8, fontSize: 15, color: Colors.dark.text },
@@ -218,14 +234,14 @@ const s = StyleSheet.create({
   errorBox: { backgroundColor: 'rgba(255,71,87,0.1)', borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,71,87,0.2)' },
   errorText: { color: '#FF4757', fontSize: 13, fontWeight: '500' as const, textAlign: 'center' as const },
   helperBox: { backgroundColor: 'rgba(249,115,22,0.08)', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(249,115,22,0.2)' },
-  helperText: { color: Colors.dark.textMuted, fontSize: 12, textAlign: 'center' as const, lineHeight: 18 },
+  helperText: { color: LOGIN_THEME.cardSecondary, fontSize: 12, fontWeight: '600' as const, textAlign: 'center' as const, lineHeight: 18 },
   forgotBtn: { alignSelf: 'flex-end' as const, marginBottom: 20, marginTop: -4 },
-  forgotText: { color: Colors.dark.primary, fontSize: 13, fontWeight: '600' as const },
+  forgotText: { color: Colors.dark.primary, fontSize: 13, fontWeight: '700' as const, letterSpacing: 0.2 },
   submitBtn: { borderRadius: 14, overflow: 'hidden', marginBottom: 20 },
   submitBtnDisabled: { opacity: 0.7 },
   submitGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8 },
   submitText: { color: '#FFF', fontSize: 15, fontWeight: '800' as const, letterSpacing: 0.5 },
   switchRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
-  switchLabel: { color: Colors.dark.textMuted, fontSize: 13 },
-  switchLink: { color: Colors.dark.primary, fontSize: 13, fontWeight: '700' as const },
+  switchLabel: { color: LOGIN_THEME.cardSecondary, fontSize: 13, fontWeight: '600' as const },
+  switchLink: { color: Colors.dark.primary, fontSize: 13, fontWeight: '800' as const, letterSpacing: 0.2 },
 });

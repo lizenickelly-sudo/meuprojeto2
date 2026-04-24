@@ -147,7 +147,7 @@ export default function LeaderboardScreen() {
 }
 
 const s = StyleSheet.create({
-  ctr: { flex: 1, backgroundColor: Colors.dark.background },
+  ctr: { flex: 1, backgroundColor: 'transparent' },
   sc: { paddingBottom: 20, paddingTop: 12 },
   headerCard: { marginHorizontal: 16, borderRadius: 16, overflow: 'hidden', shadowColor: '#00FF87', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 8 },
   headerGrad: { padding: 18, alignItems: 'center' },

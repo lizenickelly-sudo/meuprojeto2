@@ -191,7 +191,7 @@ export default function ForgotPasswordScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  bgFill: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: Colors.dark.background },
+  bgFill: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' },
   scroll: { paddingHorizontal: 24 },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.dark.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.dark.cardBorder },

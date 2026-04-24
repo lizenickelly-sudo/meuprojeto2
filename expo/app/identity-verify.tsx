@@ -672,7 +672,7 @@ export default function IdentityVerifyScreen() {
 }
 
 const v = StyleSheet.create({
-  ctr: { flex: 1, backgroundColor: Colors.dark.background },
+  ctr: { flex: 1, backgroundColor: 'transparent' },
   sc: { paddingBottom: 20, paddingTop: 16 },
   headerCard: { alignItems: 'center', marginHorizontal: 16, marginBottom: 24, gap: 8 },
   headerTtl: { color: Colors.dark.text, fontSize: 22, fontWeight: '800' as const, textAlign: 'center' },

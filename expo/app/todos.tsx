@@ -64,7 +64,7 @@ export default function TodosScreen() {
 const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: 'transparent',
     padding: 16,
   },
   title: {

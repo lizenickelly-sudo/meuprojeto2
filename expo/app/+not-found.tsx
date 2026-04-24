@@ -29,7 +29,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: 'transparent',
   },
   iconWrap: {
     width: 80,

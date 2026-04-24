@@ -272,7 +272,7 @@ function WebMapFallback({ sponsors, selected, onSelect }: {
 }
 
 const wm = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
   mapPlaceholder: { alignItems: 'center', justifyContent: 'center', paddingVertical: 32 },
   iconCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.dark.primaryFaint, alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1, borderColor: Colors.dark.primaryBorder },
   placeholderTitle: { color: Colors.dark.text, fontSize: 18, fontWeight: '700' as const, marginTop: 4 },
@@ -608,7 +608,7 @@ export default function MapScreen() {
 }
 
 const m = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
   map: { flex: 1 },
   topBar: { position: 'absolute', left: 16, right: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', zIndex: 5 },
   topInfo: { backgroundColor: Colors.dark.card, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.cardBorder, shadowColor: '#00FF87', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },

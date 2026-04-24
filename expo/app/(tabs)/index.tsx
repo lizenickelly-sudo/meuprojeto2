@@ -6,13 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   Animated,
+  Modal,
   Platform,
   RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import {
   ScanLine,
   ChevronRight,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
+import { useScrollToTopOnFocus } from '@/lib/useScrollToTopOnFocus';
 import { useUser } from '@/providers/UserProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useAdmin } from '@/providers/AdminProvider';
@@ -33,6 +35,8 @@ import WelcomeSplash from '@/components/WelcomeSplash';
 import type { Sponsor } from "@/types";
 
 console.log("[HomeScreen] Mounting home screen");
+
+const STAR_RATING_OPTIONS = [1, 2, 3, 4, 5] as const;
 
 function WinnerTicker() {
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -89,12 +93,12 @@ function WinnerTicker() {
 }
 
 const wt = StyleSheet.create({
-  container: { height: 36, overflow: 'hidden', backgroundColor: Colors.dark.primaryFaint, borderRadius: 8, marginHorizontal: 16, marginBottom: 16, borderWidth: 1, borderColor: Colors.dark.primaryBorder },
+  container: { height: 36, overflow: 'hidden', backgroundColor: 'rgba(9,14,28,0.48)', borderRadius: 8, marginHorizontal: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
   row: { flexDirection: 'row', alignItems: 'center', height: 36 },
   item: { flexDirection: 'row', alignItems: 'center', marginRight: 24, gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.dark.primary },
-  name: { color: Colors.dark.text, fontSize: 12, fontWeight: '600' as const },
-  city: { color: Colors.dark.textMuted, fontSize: 11 },
+  name: { color: '#F8FAFC', fontSize: 12, fontWeight: '600' as const },
+  city: { color: 'rgba(226,232,240,0.72)', fontSize: 11 },
   amt: { color: Colors.dark.primary, fontSize: 12, fontWeight: '800' as const },
 });
 
@@ -103,7 +107,8 @@ function SponsorListItem({
   onPress,
   liked,
   starred,
-  stars,
+  averageStars,
+  ratingCount,
   rank,
   onToggleLike,
   onToggleStar,
@@ -112,13 +117,17 @@ function SponsorListItem({
   onPress: () => void;
   liked: boolean;
   starred: boolean;
-  stars: number;
+  averageStars: number;
+  ratingCount: number;
   rank: number;
   onToggleLike: () => void;
   onToggleStar: () => void;
 }) {
-  const hasCoupon = Boolean(sponsor.couponValue && sponsor.couponValue >= 5);
-  const starsLabel = `${stars} estrela${stars === 1 ? '' : 's'}`;
+  const starsLabel = ratingCount > 0 ? `${ratingCount} avaliac${ratingCount === 1 ? 'ao' : 'oes'}` : 'Avaliar';
+  const hasRatings = ratingCount > 0;
+  const averageStarsLabel = hasRatings
+    ? averageStars.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    : 'Sem avaliacoes';
 
   return (
     <View style={sl.card} testID={`sponsor-list-${sponsor.id}`}>
@@ -138,18 +147,20 @@ function SponsorListItem({
 
           <View style={sl.metaRow}>
             <Star size={11} color="#F59E0B" fill="#F59E0B" />
-            <Text style={sl.metaStrong}>{stars > 0 ? stars.toFixed(1) : '4.5'}</Text>
-            <Text style={sl.metaText}>({Math.max(stars * 12, 12)})</Text>
+            {hasRatings ? (
+              <>
+                <Text style={sl.metaStrong}>{averageStarsLabel}</Text>
+                <Text style={sl.metaText}>({ratingCount})</Text>
+              </>
+            ) : (
+              <Text style={sl.metaText}>{averageStarsLabel}</Text>
+            )}
             <Text style={sl.metaDot}>•</Text>
             <Text style={sl.metaText}>{sponsor.city}</Text>
-            <Text style={sl.metaDot}>•</Text>
-            <Text style={sl.metaText}>R$ {sponsor.minPurchaseValue?.toFixed(2)}</Text>
           </View>
 
           <View style={sl.bottomRow}>
             <Text style={sl.categoryText} numberOfLines={1}>{sponsor.category}</Text>
-            {hasCoupon && <Text style={sl.couponTag}>R$ {sponsor.couponValue?.toFixed(0)} off</Text>}
-            <Text style={sl.rankTag}>#{rank}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -173,8 +184,12 @@ const sl = StyleSheet.create({
     alignItems: 'flex-start',
     paddingVertical: 10,
     paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(8,12,24,0.52)',
   },
   mainTap: {
     flex: 1,
@@ -186,9 +201,9 @@ const sl = StyleSheet.create({
     height: 58,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: Colors.dark.surfaceLight,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
-    borderColor: Colors.dark.cardBorder,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   logo: {
     width: '100%',
@@ -216,11 +231,11 @@ const sl = StyleSheet.create({
     fontWeight: '700' as const,
   },
   verifiedBadge: {
-    color: Colors.dark.textMuted,
+    color: 'rgba(226,232,240,0.72)',
     fontSize: 10,
   },
   name: {
-    color: Colors.dark.text,
+    color: '#F8FAFC',
     fontSize: 15,
     fontWeight: '700' as const,
     flexShrink: 1,
@@ -237,11 +252,11 @@ const sl = StyleSheet.create({
     fontWeight: '700' as const,
   },
   metaDot: {
-    color: Colors.dark.textMuted,
+    color: 'rgba(226,232,240,0.62)',
     fontSize: 10,
   },
   metaText: {
-    color: Colors.dark.textMuted,
+    color: 'rgba(226,232,240,0.72)',
     fontSize: 11,
   },
   bottomRow: {
@@ -251,19 +266,9 @@ const sl = StyleSheet.create({
     marginTop: 2,
   },
   categoryText: {
-    color: Colors.dark.textMuted,
+    color: 'rgba(226,232,240,0.72)',
     fontSize: 11,
     flex: 1,
-  },
-  couponTag: {
-    color: '#22C55E',
-    fontSize: 11,
-    fontWeight: '700' as const,
-  },
-  rankTag: {
-    color: '#A78BFA',
-    fontSize: 11,
-    fontWeight: '700' as const,
   },
   rightActions: {
     marginLeft: 8,
@@ -276,15 +281,15 @@ const sl = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.dark.cardBorder,
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   starsTiny: {
-    color: Colors.dark.textMuted,
+    color: 'rgba(226,232,240,0.68)',
     fontSize: 9,
-    maxWidth: 44,
+    maxWidth: 56,
     textAlign: 'center',
   },
 });
@@ -293,6 +298,7 @@ export default function HomeScreen() {
   console.log("[HomeScreen] Rendering home screen");
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const scrollRef = useRef<ScrollView | null>(null);
   const { profile, balance, isLoading: userLoading } = useUser();
   const {
     sponsors,
@@ -302,6 +308,8 @@ export default function HomeScreen() {
     isSponsorLiked,
     isSponsorStarred,
     getSponsorStars,
+    getSponsorAverageStars,
+    getSponsorRatingCount,
   } = useSponsor();
   const { grandPrizeConfig, getCityPrize, getCityImage } = useAdmin();
   const { userEmail } = useAuth();
@@ -329,11 +337,15 @@ export default function HomeScreen() {
 
   const rankedCitySponsors = useMemo(() => {
     return [...citySponsors].sort((a, b) => {
-      const starsDiff = getSponsorStars(b.id) - getSponsorStars(a.id);
-      if (starsDiff !== 0) return starsDiff;
+      const averageDiff = getSponsorAverageStars(b.id) - getSponsorAverageStars(a.id);
+      if (averageDiff !== 0) return averageDiff;
+
+      const countDiff = getSponsorRatingCount(b.id) - getSponsorRatingCount(a.id);
+      if (countDiff !== 0) return countDiff;
+
       return a.name.localeCompare(b.name);
     });
-  }, [citySponsors, getSponsorStars]);
+  }, [citySponsors, getSponsorAverageStars, getSponsorRatingCount]);
 
   const cityOffers = useMemo(() => {
     return citySponsors.flatMap((sp) => sp.offers);
@@ -346,6 +358,9 @@ export default function HomeScreen() {
   const [showSplash, setShowSplash] = useState<boolean>(shouldShowWelcomeSplash);
   const [splashEmail, setSplashEmail] = useState<string>('');
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [ratingSponsor, setRatingSponsor] = useState<Sponsor | null>(null);
+
+  useScrollToTopOnFocus(scrollRef);
 
   useEffect(() => {
     if (!shouldShowWelcomeSplash) return;
@@ -359,7 +374,8 @@ export default function HomeScreen() {
 
   const handleDismissSplash = useCallback(() => {
     setShowSplash(false);
-  }, []);
+    router.push('/reels');
+  }, [router]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -374,29 +390,63 @@ export default function HomeScreen() {
     router.push({ pathname: '/sponsor-detail', params: { sponsorId } });
   }, [router]);
 
+  const handleOpenSponsorRating = useCallback((sponsor: Sponsor) => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setRatingSponsor(sponsor);
+  }, []);
+
+  const handleCloseSponsorRating = useCallback(() => {
+    setRatingSponsor(null);
+  }, []);
+
+  const handleSelectSponsorRating = useCallback((value: number) => {
+    if (!ratingSponsor) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    toggleSponsorStar(ratingSponsor.id, value);
+    setRatingSponsor(null);
+  }, [ratingSponsor, toggleSponsorStar]);
+
+  const handleClearSponsorRating = useCallback(() => {
+    if (!ratingSponsor) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleSponsorStar(ratingSponsor.id, 0);
+    setRatingSponsor(null);
+  }, [ratingSponsor, toggleSponsorStar]);
+
+  const selectedSponsorStars = ratingSponsor ? getSponsorStars(ratingSponsor.id) : 0;
+
   if (showSplash) {
     if (userLoading) {
       return (
-        <View style={s.container}>
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: Colors.dark.textMuted, fontSize: 14 }}>Carregando...</Text>
+        <>
+          <Tabs.Screen options={{ tabBarStyle: { display: 'none' } }} />
+          <View style={s.container}>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ color: Colors.dark.textMuted, fontSize: 14 }}>Carregando...</Text>
+            </View>
           </View>
-        </View>
+        </>
       );
     }
     return (
-      <WelcomeSplash
-        userCity={userCity || undefined}
-        grandPrizeConfig={userCity ? (cityPrize || grandPrizeConfig) : grandPrizeConfig}
-        cityImage={userCity ? cityImage : undefined}
-        onContinue={handleDismissSplash}
-      />
+      <>
+        <Tabs.Screen options={{ tabBarStyle: { display: 'none' } }} />
+        <WelcomeSplash
+          userCity={userCity || undefined}
+          grandPrizeConfig={userCity ? (cityPrize || grandPrizeConfig) : grandPrizeConfig}
+          cityImage={userCity ? cityImage : undefined}
+          onContinue={handleDismissSplash}
+        />
+      </>
     );
   }
 
   return (
     <View style={s.container}>
+      <Tabs.Screen options={{ tabBarStyle: showSplash ? { display: 'none' } : undefined }} />
+
       <ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8 }]}
         refreshControl={
@@ -458,10 +508,11 @@ export default function HomeScreen() {
                   onPress={() => handleSponsorPress(sp.id)}
                   liked={isSponsorLiked(sp.id)}
                   starred={isSponsorStarred(sp.id)}
-                  stars={getSponsorStars(sp.id)}
+                  averageStars={getSponsorAverageStars(sp.id)}
+                  ratingCount={getSponsorRatingCount(sp.id)}
                   rank={index + 1}
                   onToggleLike={() => toggleLikeSponsor(sp.id)}
-                  onToggleStar={() => toggleSponsorStar(sp.id)}
+                  onToggleStar={() => handleOpenSponsorRating(sp)}
                 />
               ))}
             </View>
@@ -470,27 +521,97 @@ export default function HomeScreen() {
 
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      <Modal
+        visible={Boolean(ratingSponsor)}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseSponsorRating}
+      >
+        <View style={s.ratingOverlay}>
+          <TouchableOpacity style={s.ratingBackdrop} activeOpacity={1} onPress={handleCloseSponsorRating} />
+          <View style={s.ratingCard}>
+            <Text style={s.ratingEyebrow}>Avaliar loja</Text>
+            <Text style={s.ratingTitle}>{ratingSponsor?.name}</Text>
+            <Text style={s.ratingSubtitle}>Escolha quantas estrelas você quer dar para esta loja.</Text>
+
+            <View style={s.ratingOptions}>
+              {STAR_RATING_OPTIONS.map((value) => {
+                const active = selectedSponsorStars === value;
+                return (
+                  <TouchableOpacity
+                    key={value}
+                    style={[s.ratingOption, active && s.ratingOptionActive]}
+                    activeOpacity={0.82}
+                    onPress={() => handleSelectSponsorRating(value)}
+                  >
+                    <View style={s.ratingStarsRow}>
+                      {STAR_RATING_OPTIONS.map((starValue) => (
+                        <Star
+                          key={`${value}-${starValue}`}
+                          size={16}
+                          color={starValue <= value ? '#F59E0B' : 'rgba(148,163,184,0.5)'}
+                          fill={starValue <= value ? '#F59E0B' : 'transparent'}
+                        />
+                      ))}
+                    </View>
+                    <Text style={[s.ratingOptionText, active && s.ratingOptionTextActive]}>{value} estrela{value === 1 ? '' : 's'}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={s.ratingActions}>
+              {selectedSponsorStars > 0 && (
+                <TouchableOpacity style={s.ratingGhostBtn} onPress={handleClearSponsorRating} activeOpacity={0.82}>
+                  <Text style={s.ratingGhostTxt}>Remover avaliação</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={s.ratingCloseBtn} onPress={handleCloseSponsorRating} activeOpacity={0.82}>
+                <Text style={s.ratingCloseTxt}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
   scroll: { paddingBottom: 20 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
-  greeting: { color: Colors.dark.textSecondary, fontSize: 16 },
-  nameAccent: { color: Colors.dark.text, fontWeight: '800' as const, fontSize: 18 },
-  subtitle: { color: Colors.dark.textMuted, fontSize: 12, marginTop: 2 },
-  balanceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.dark.primaryFaint, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: Colors.dark.primaryBorder },
-  balanceTxt: { color: Colors.dark.primary, fontSize: 14, fontWeight: '800' as const },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginHorizontal: 16, marginBottom: 12, paddingVertical: 16, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: 'rgba(7,11,22,0.38)' },
+  greeting: { color: 'rgba(226,232,240,0.82)', fontSize: 16 },
+  nameAccent: { color: '#F8FAFC', fontWeight: '800' as const, fontSize: 18 },
+  subtitle: { color: 'rgba(241,245,249,0.84)', fontSize: 12, marginTop: 2 },
+  balanceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  balanceTxt: { color: '#F8FAFC', fontSize: 14, fontWeight: '800' as const },
   quickRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 16 },
   quickBtn: { flex: 1, borderRadius: 14, overflow: 'hidden', shadowColor: '#F97316', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
   quickGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
   quickTxt: { color: '#FFF', fontSize: 14, fontWeight: '900' as const, letterSpacing: 0.5 },
   sponsorsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginTop: 4, marginBottom: 4 },
-  sponsorsTitle: { color: Colors.dark.text, fontSize: 20, fontWeight: '800' as const },
-  sponsorsSubTitle: { color: Colors.dark.textMuted, fontSize: 11, marginTop: 1 },
+  sponsorsTitle: { color: '#F8FAFC', fontSize: 20, fontWeight: '800' as const },
+  sponsorsSubTitle: { color: 'rgba(226,232,240,0.72)', fontSize: 11, marginTop: 1 },
   seeAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  seeAll: { color: Colors.dark.primary, fontSize: 13, fontWeight: '600' as const },
+  seeAll: { color: '#F8FAFC', fontSize: 13, fontWeight: '600' as const },
   sponsorsList: { marginBottom: 8 },
+  ratingOverlay: { flex: 1, backgroundColor: 'rgba(2,6,23,0.48)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  ratingBackdrop: { ...StyleSheet.absoluteFillObject },
+  ratingCard: { width: '100%', maxWidth: 380, borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: 'rgba(10,15,28,0.96)', padding: 20, gap: 12 },
+  ratingEyebrow: { color: '#F59E0B', fontSize: 11, fontWeight: '800' as const, letterSpacing: 1.1, textTransform: 'uppercase' as const },
+  ratingTitle: { color: '#F8FAFC', fontSize: 22, fontWeight: '800' as const },
+  ratingSubtitle: { color: 'rgba(226,232,240,0.78)', fontSize: 13, lineHeight: 19 },
+  ratingOptions: { gap: 10, marginTop: 4 },
+  ratingOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 14, paddingVertical: 12 },
+  ratingOptionActive: { borderColor: 'rgba(245,158,11,0.48)', backgroundColor: 'rgba(245,158,11,0.12)' },
+  ratingStarsRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ratingOptionText: { color: '#E2E8F0', fontSize: 13, fontWeight: '700' as const },
+  ratingOptionTextActive: { color: '#F8FAFC' },
+  ratingActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 6 },
+  ratingGhostBtn: { paddingVertical: 10, paddingHorizontal: 12 },
+  ratingGhostTxt: { color: 'rgba(226,232,240,0.76)', fontSize: 13, fontWeight: '700' as const },
+  ratingCloseBtn: { marginLeft: 'auto', borderRadius: 14, backgroundColor: '#F59E0B', paddingHorizontal: 16, paddingVertical: 10 },
+  ratingCloseTxt: { color: '#111827', fontSize: 13, fontWeight: '900' as const, letterSpacing: 0.3 },
 });

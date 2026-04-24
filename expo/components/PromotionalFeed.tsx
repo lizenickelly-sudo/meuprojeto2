@@ -335,9 +335,13 @@ const pf = StyleSheet.create({
     marginBottom: 12,
   },
   title: {
-    color: Colors.dark.text,
-    fontSize: 20,
+    color: '#F8FAFC',
+    fontSize: 21,
     fontWeight: '800' as const,
+    letterSpacing: 0.2,
+    textShadowColor: 'rgba(0,0,0,0.32)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
   dotsRow: {
     flexDirection: 'row',

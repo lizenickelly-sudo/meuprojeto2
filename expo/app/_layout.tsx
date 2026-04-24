@@ -2,11 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useCallback } from "react";
+import { StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
 import { AppProvider } from "@/providers/AppProvider";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AppWallpaper from "@/components/AppWallpaper";
 import Colors from "@/constants/colors";
 
 SplashScreen.preventAutoHideAsync();
@@ -26,14 +28,14 @@ function RootLayoutNav() {
     <Stack
       screenOptions={{
         headerBackTitle: "Voltar",
-        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerStyle: { backgroundColor: 'rgba(255,255,255,0.78)' },
         headerTintColor: Colors.dark.primary,
         headerTitleStyle: {
           color: Colors.dark.text,
           fontWeight: "700" as const,
           fontSize: 17,
         },
-        contentStyle: { backgroundColor: Colors.dark.background },
+        contentStyle: { backgroundColor: 'transparent' },
         animation: "slide_from_right",
       }}
     >
@@ -67,8 +69,11 @@ function AppShell() {
   const { resetEpoch, isLoggedIn, userEmail } = useAuth();
   return (
     <AppProvider key={`app_${resetEpoch}_${isLoggedIn ? userEmail : 'guest'}`}>
-      <StatusBar style="dark" />
-      <RootLayoutNav />
+      <View style={s.shell}>
+        <AppWallpaper />
+        <StatusBar style="dark" />
+        <RootLayoutNav />
+      </View>
     </AppProvider>
   );
 }
@@ -86,7 +91,7 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView
-        style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+        style={s.gestureRoot}
       >
         <ErrorBoundary>
           <AuthProvider>
@@ -97,3 +102,14 @@ export default function RootLayout() {
     </QueryClientProvider>
   );
 }
+
+const s = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  shell: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+});

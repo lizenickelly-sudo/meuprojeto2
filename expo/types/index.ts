@@ -83,6 +83,10 @@ export interface Sponsor {
   stories?: SponsorStory[];
   galleryImages?: SponsorImage[];
   promotionalVideos?: SponsorVideo[];
+  ratingsByUser?: Record<string, number>;
+  ratingAverage?: number;
+  ratingCount?: number;
+  ratingTotal?: number;
 }
 
 export interface SponsorStory {
