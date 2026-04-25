@@ -24,18 +24,24 @@ const STORE_THEME = {
   titleShadow: 'rgba(0,0,0,0.32)',
 };
 
-function openDirections(lat: number, lon: number, label: string) {
-  const encoded = encodeURIComponent(label);
+function openDirections(address: string, lat?: number, lon?: number) {
+  const trimmedAddress = address.trim();
+  const hasCoordinates = typeof lat === 'number' && Number.isFinite(lat) && typeof lon === 'number' && Number.isFinite(lon);
+  const destination = trimmedAddress || (hasCoordinates ? `${lat},${lon}` : '');
+
+  if (!destination) return;
+
+  const encodedDestination = encodeURIComponent(destination);
   if (Platform.OS === 'ios') {
-    Linking.openURL(`maps:0,0?daddr=${lat},${lon}&dirflg=d`).catch(() => {
-      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&destination_place_id=${encoded}&travelmode=driving`);
+    Linking.openURL(`maps://?daddr=${encodedDestination}&dirflg=d`).catch(() => {
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}&travelmode=driving`);
     });
   } else if (Platform.OS === 'android') {
-    Linking.openURL(`google.navigation:q=${lat},${lon}&mode=d`).catch(() => {
-      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=driving`);
+    Linking.openURL(`google.navigation:q=${encodedDestination}&mode=d`).catch(() => {
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}&travelmode=driving`);
     });
   } else {
-    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=driving`);
+    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}&travelmode=driving`);
   }
 }
 
@@ -48,10 +54,12 @@ export default function SponsorDetailScreen() {
   const [selectedOfferList, setSelectedOfferList] = useState<Offer[]>([]);
   const [selectedOfferIndex, setSelectedOfferIndex] = useState<number>(0);
   const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [modalPresentationMode, setModalPresentationMode] = useState<'default' | 'product-card'>('default');
   const [activeTab, setActiveTab] = useState<'grid' | 'list'>('grid');
 
   const handleOfferPress = useCallback((offer: Offer, index: number) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setModalPresentationMode('default');
     setSelectedOfferList(sponsor?.offers || []);
     setSelectedOfferIndex(index);
     setSelectedOffer(offer);
@@ -74,6 +82,7 @@ export default function SponsorDetailScreen() {
       shares: item.shares || 0,
     }));
     const idx = Math.max(0, productOffers.findIndex((item) => item.id === product.id));
+    setModalPresentationMode('product-card');
     setSelectedOfferList(productOffers);
     setSelectedOfferIndex(idx);
     setSelectedOffer(productOffers[idx] || null);
@@ -82,6 +91,7 @@ export default function SponsorDetailScreen() {
 
   const handleCloseModal = useCallback(() => {
     setModalVisible(false);
+    setModalPresentationMode('default');
     setSelectedOffer(null);
     setSelectedOfferList([]);
     setSelectedOfferIndex(0);
@@ -90,7 +100,8 @@ export default function SponsorDetailScreen() {
   const handleGoLocation = useCallback(() => {
     if (!sponsor) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    openDirections(sponsor.latitude, sponsor.longitude, sponsor.name);
+    const destinationAddress = [sponsor.address, sponsor.city, sponsor.state].filter(Boolean).join(', ');
+    openDirections(destinationAddress, sponsor.latitude, sponsor.longitude);
   }, [sponsor]);
 
   if (!sponsor) {
@@ -115,7 +126,15 @@ export default function SponsorDetailScreen() {
         title: sponsor.name,
         headerStyle: { backgroundColor: Colors.dark.surface },
         headerTintColor: Colors.dark.neonGreen,
-        headerTitleStyle: { color: STORE_THEME.textPrimary, fontWeight: '800' as const, fontSize: 17, letterSpacing: 0.3 },
+        headerBackTitleVisible: false,
+        headerTitleAlign: 'left',
+        headerTitleContainerStyle: { maxWidth: SCREEN_W - 118 },
+        headerTitle: () => (
+          <View style={d.headerTitleWrap}>
+            <Text style={d.headerEyebrow}>Patrocinador</Text>
+            <Text style={d.headerTitleText} numberOfLines={1}>{sponsor.name}</Text>
+          </View>
+        ),
       }} />
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={d.profileSection}>
@@ -285,6 +304,7 @@ export default function SponsorDetailScreen() {
         sponsor={sponsor}
         offerList={selectedOfferList}
         initialIndex={selectedOfferIndex}
+        presentationMode={modalPresentationMode}
         onClose={handleCloseModal}
       />
     </View>
@@ -295,6 +315,22 @@ const d = StyleSheet.create({
   ctr: { flex: 1, backgroundColor: 'transparent' },
   empty: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   emptyTxt: { color: STORE_THEME.textMuted, fontSize: 16, fontWeight: '600' as const },
+  headerTitleWrap: {
+    gap: 1,
+  },
+  headerEyebrow: {
+    color: 'rgba(226,232,240,0.68)',
+    fontSize: 10,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.8,
+  },
+  headerTitleText: {
+    color: Colors.dark.primary,
+    fontSize: 16,
+    fontWeight: '900' as const,
+    letterSpacing: 0.2,
+  },
 
   profileSection: {
     backgroundColor: 'rgba(7,11,22,0.42)',

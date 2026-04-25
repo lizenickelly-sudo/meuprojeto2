@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   SPONSORS: 'cashboxpix_sponsors',
   SPONSORS_VERSION: 'cashboxpix_sponsors_version',
   LIKED_OFFERS: 'cashboxpix_liked_offers',
+  LIKED_PROMOTIONAL_VIDEOS: 'cashboxpix_liked_promotional_videos',
   SHARED_OFFERS: 'cashboxpix_shared_offers',
   LIKED_SPONSORS: 'cashboxpix_liked_sponsors',
   STARRED_SPONSORS: 'cashboxpix_starred_sponsors',
@@ -27,6 +28,7 @@ const SPONSOR_CACHE_TTL_MS = 1000 * 60 * 20;
 const SPONSOR_CACHE_KEYS = {
   SPONSORS: 'sponsors',
   LIKED_OFFERS: 'liked_offers',
+  LIKED_PROMOTIONAL_VIDEOS: 'liked_promotional_videos',
   SHARED_OFFERS: 'shared_offers',
   LIKED_SPONSORS: 'liked_sponsors',
   STARRED_SPONSORS: 'starred_sponsors',
@@ -102,13 +104,17 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   const { isLoggedIn, userEmail } = useAuth();
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [likedOffers, setLikedOffers] = useState<string[]>([]);
+  const [likedPromotionalVideos, setLikedPromotionalVideos] = useState<string[]>([]);
   const [sharedOffers, setSharedOffers] = useState<string[]>([]);
   const [likedSponsors, setLikedSponsors] = useState<string[]>([]);
   const [starredSponsors, setStarredSponsors] = useState<string[]>([]);
   const [sponsorStars, setSponsorStars] = useState<Record<string, number>>({});
   const ratingUserKey = normalizeUserRatingKey(userEmail);
+  const likedPromotionalVideosStorageKey = getScopedStateKey(STORAGE_KEYS.LIKED_PROMOTIONAL_VIDEOS, ratingUserKey);
+  const likedPromotionalVideosCacheKey = getScopedStateKey(SPONSOR_CACHE_KEYS.LIKED_PROMOTIONAL_VIDEOS, ratingUserKey);
   const starredSponsorsStorageKey = getScopedStateKey(STORAGE_KEYS.STARRED_SPONSORS, ratingUserKey);
   const sponsorStarsStorageKey = getScopedStateKey(STORAGE_KEYS.SPONSOR_STARS, ratingUserKey);
+  const likedPromotionalVideosQueryKey = ['liked_promotional_videos', ratingUserKey] as const;
   const starredSponsorsCacheKey = getScopedStateKey(SPONSOR_CACHE_KEYS.STARRED_SPONSORS, ratingUserKey);
   const sponsorStarsCacheKey = getScopedStateKey(SPONSOR_CACHE_KEYS.SPONSOR_STARS, ratingUserKey);
 
@@ -149,6 +155,23 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.LIKED_OFFERS);
       const value = stored ? JSON.parse(stored) as string[] : [];
       await writeDomainCache('sponsor', SPONSOR_CACHE_KEYS.LIKED_OFFERS, value);
+      return value;
+    },
+    staleTime: 0,
+    refetchOnMount: 'stale',
+  });
+
+  const likedPromotionalVideosQuery = useQuery({
+    queryKey: likedPromotionalVideosQueryKey,
+    queryFn: async () => {
+      if (!ratingUserKey) return [];
+
+      const cached = await readDomainCache<string[]>('sponsor', likedPromotionalVideosCacheKey, SPONSOR_CACHE_TTL_MS);
+      if (cached) return cached;
+
+      const stored = await AsyncStorage.getItem(likedPromotionalVideosStorageKey);
+      const value = stored ? JSON.parse(stored) as string[] : [];
+      await writeDomainCache('sponsor', likedPromotionalVideosCacheKey, value);
       return value;
     },
     staleTime: 0,
@@ -222,11 +245,13 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   useEffect(() => {
     if (!isLoggedIn) {
       setLikedOffers([]);
+      setLikedPromotionalVideos([]);
       setSharedOffers([]);
       setLikedSponsors([]);
       setStarredSponsors([]);
       setSponsorStars({});
       queryClient.removeQueries({ queryKey: ['liked_offers'] });
+      queryClient.removeQueries({ queryKey: ['liked_promotional_videos'] });
       queryClient.removeQueries({ queryKey: ['shared_offers'] });
       queryClient.removeQueries({ queryKey: ['liked_sponsors'] });
       queryClient.removeQueries({ queryKey: ['starred_sponsors'] });
@@ -243,6 +268,7 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
         void invalidateDomainKey('sponsor', SPONSOR_CACHE_KEYS.SPONSORS);
         queryClient.invalidateQueries({ queryKey: ['sponsors'] });
         queryClient.invalidateQueries({ queryKey: ['liked_offers'] });
+        queryClient.invalidateQueries({ queryKey: ['liked_promotional_videos'] });
         queryClient.invalidateQueries({ queryKey: ['shared_offers'] });
         queryClient.invalidateQueries({ queryKey: ['liked_sponsors'] });
         queryClient.invalidateQueries({ queryKey: ['starred_sponsors'] });
@@ -259,6 +285,10 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   useEffect(() => {
     if (likedOffersQuery.data) setLikedOffers(likedOffersQuery.data);
   }, [likedOffersQuery.data]);
+
+  useEffect(() => {
+    if (likedPromotionalVideosQuery.data) setLikedPromotionalVideos(likedPromotionalVideosQuery.data);
+  }, [likedPromotionalVideosQuery.data]);
 
   useEffect(() => {
     if (sharedOffersQuery.data) setSharedOffers(sharedOffersQuery.data);
@@ -302,6 +332,18 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     onSuccess: (data) => {
       setLikedOffers(data);
       queryClient.invalidateQueries({ queryKey: ['liked_offers'] });
+    },
+  });
+
+  const saveLikedPromotionalVideosMutation = useMutation({
+    mutationFn: async (videoIds: string[]) => {
+      await AsyncStorage.setItem(likedPromotionalVideosStorageKey, JSON.stringify(videoIds));
+      await writeDomainCache('sponsor', likedPromotionalVideosCacheKey, videoIds);
+      return videoIds;
+    },
+    onSuccess: (data) => {
+      setLikedPromotionalVideos(data);
+      queryClient.invalidateQueries({ queryKey: ['liked_promotional_videos'] });
     },
   });
 
@@ -407,6 +449,30 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     return changed;
   }, [sponsors, saveSponsorsMutation]);
 
+  const bumpPromotionalVideoLikes = useCallback((videoId: string) => {
+    let changed = false;
+    const updatedSponsors = sponsors.map((sponsor) => {
+      const nextPromotionalVideos = (sponsor.promotionalVideos || []).map((video) => {
+        if (video.id !== videoId) return video;
+        changed = true;
+        return {
+          ...video,
+          likes: (video.likes || 0) + 1,
+        };
+      });
+
+      return changed ? { ...sponsor, promotionalVideos: nextPromotionalVideos } : sponsor;
+    });
+
+    if (changed) {
+      setSponsors(updatedSponsors);
+      queryClient.setQueryData(['sponsors'], updatedSponsors);
+      saveSponsorsMutation.mutate(updatedSponsors);
+    }
+
+    return changed;
+  }, [queryClient, saveSponsorsMutation, sponsors]);
+
   const addSponsor = useCallback((sponsor: Sponsor) => {
     const updated = [...sponsors, sponsor];
     saveSponsorsMutation.mutate(updated);
@@ -439,6 +505,23 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     return true;
   }, [likedOffers, saveLikedOffersMutation, bumpOfferCounter]);
 
+  const likePromotionalVideo = useCallback((videoId: string): boolean => {
+    if (!ratingUserKey) return false;
+
+    if (likedPromotionalVideos.includes(videoId)) {
+      console.log('[SponsorProvider] Promotional video already liked:', videoId);
+      return false;
+    }
+
+    const changed = bumpPromotionalVideoLikes(videoId);
+    if (!changed) return false;
+
+    const updated = [...likedPromotionalVideos, videoId];
+    saveLikedPromotionalVideosMutation.mutate(updated);
+    console.log('[SponsorProvider] Liked promotional video:', videoId);
+    return true;
+  }, [bumpPromotionalVideoLikes, likedPromotionalVideos, ratingUserKey, saveLikedPromotionalVideosMutation]);
+
   const shareOffer = useCallback((offerId: string, onPoints?: (pts: number) => void): boolean => {
     if (sharedOffers.includes(offerId)) {
       console.log('[SponsorProvider] Offer already shared:', offerId);
@@ -463,6 +546,10 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
   const isOfferLiked = useCallback((offerId: string) => {
     return likedOffers.includes(offerId);
   }, [likedOffers]);
+
+  const isPromotionalVideoLiked = useCallback((videoId: string) => {
+    return likedPromotionalVideos.includes(videoId);
+  }, [likedPromotionalVideos]);
 
   const isOfferShared = useCallback((offerId: string) => {
     return sharedOffers.includes(offerId);
@@ -597,9 +684,11 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     sponsorsByCity,
     sponsorsByState,
     toggleLikeOffer,
+    likePromotionalVideo,
     shareOffer,
     addOfferComment,
     isOfferLiked,
+    isPromotionalVideoLiked,
     isOfferShared,
     toggleLikeSponsor,
     toggleSponsorStar,
@@ -609,6 +698,7 @@ export const [SponsorProvider, useSponsor] = createContextHook(() => {
     getSponsorAverageStars,
     getSponsorRatingCount,
     likedOffers,
+    likedPromotionalVideos,
     sharedOffers,
     likedSponsors,
     starredSponsors,

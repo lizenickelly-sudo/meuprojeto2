@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, AppStateStatus, FlatList, InteractionManager, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { AppState, AppStateStatus, FlatList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -25,18 +25,14 @@ function normalizeText(value?: string): string {
     .toLowerCase();
 }
 
-function getRandomIndex(length: number): number {
-  if (length <= 1) return 0;
-  return Math.floor(Math.random() * length);
-}
-
 export default function ReelsScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<ReelEntry> | null>(null);
-  const hasFocusedRef = useRef(false);
+  const reelsRef = useRef<ReelEntry[]>([]);
+  const activeReelIdRef = useRef<string | null>(null);
   const { sponsors } = useSponsor();
   const { profile } = useUser();
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -72,7 +68,12 @@ export default function ReelsScreen() {
         sponsor,
         video,
       })))
-      .sort((a, b) => new Date(b.video.createdAt).getTime() - new Date(a.video.createdAt).getTime());
+      .sort((a, b) => {
+        const likesDiff = (b.video.likes || 0) - (a.video.likes || 0);
+        if (likesDiff !== 0) return likesDiff;
+
+        return new Date(b.video.createdAt).getTime() - new Date(a.video.createdAt).getTime();
+      });
   }, [normalizedCity, normalizedState, sponsors]);
 
   const citySponsorCount = useMemo(() => {
@@ -84,6 +85,50 @@ export default function ReelsScreen() {
       return true;
     }).length;
   }, [normalizedCity, normalizedState, sponsors]);
+
+  useEffect(() => {
+    reelsRef.current = reels;
+  }, [reels]);
+
+  useEffect(() => {
+    if (!activeReelIdRef.current && reels[activeIndex]?.id) {
+      activeReelIdRef.current = reels[activeIndex].id;
+    }
+  }, [activeIndex, reels]);
+
+  useEffect(() => {
+    if (!reels.length) {
+      activeReelIdRef.current = null;
+      if (activeIndex !== 0) {
+        setActiveIndex(0);
+      }
+      return;
+    }
+
+    const currentReelId = activeReelIdRef.current;
+    if (!currentReelId) {
+      activeReelIdRef.current = reels[0].id;
+      if (activeIndex !== 0) {
+        setActiveIndex(0);
+      }
+      return;
+    }
+
+    const nextIndex = reels.findIndex((item) => item.id === currentReelId);
+    const fallbackIndex = Math.min(activeIndex, reels.length - 1);
+    const targetIndex = nextIndex >= 0 ? nextIndex : fallbackIndex;
+
+    if (nextIndex === -1) {
+      activeReelIdRef.current = reels[targetIndex]?.id ?? null;
+    }
+
+    if (targetIndex !== activeIndex) {
+      setActiveIndex(targetIndex);
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToIndex({ index: targetIndex, animated: false });
+      });
+    }
+  }, [activeIndex, reels]);
 
   const handleOpenSponsor = useCallback((sponsorId: string) => {
     router.push({ pathname: '/sponsor-detail', params: { sponsorId } });
@@ -106,28 +151,10 @@ export default function ReelsScreen() {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null; isViewable?: boolean }[] }) => {
     const nextItem = viewableItems.find((item) => item.isViewable && typeof item.index === 'number');
     if (typeof nextItem?.index === 'number') {
+      activeReelIdRef.current = reelsRef.current[nextItem.index]?.id ?? null;
       setActiveIndex(nextItem.index);
     }
   }).current;
-
-  useEffect(() => {
-    if (!isFocused) {
-      hasFocusedRef.current = false;
-      return;
-    }
-
-    if (hasFocusedRef.current || reels.length === 0) return;
-
-    hasFocusedRef.current = true;
-    const randomIndex = getRandomIndex(reels.length);
-    setActiveIndex(randomIndex);
-
-    const interaction = InteractionManager.runAfterInteractions(() => {
-      listRef.current?.scrollToIndex({ index: randomIndex, animated: false });
-    });
-
-    return () => interaction.cancel();
-  }, [isFocused, reels.length]);
 
   if (!normalizedCity) {
     return (

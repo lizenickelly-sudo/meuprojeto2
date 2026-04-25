@@ -1,7 +1,7 @@
 ﻿import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, ScrollView, Alert, Image, Modal, TextInput, ActivityIndicator, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Camera, FileText, CheckCircle, Shield, Image as ImageIcon, X, AlertCircle, Crop, RotateCw } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,13 +48,23 @@ function getInitialVerificationStep(selfieUrl?: string, documentUrl?: string, cp
 export default function IdentityVerifyScreen() {
   console.log("[IdentityVerify] Verification screen initialized");
   const router = useRouter();
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string | string[] }>();
+  const resolvedReturnTo = typeof returnTo === 'string'
+    ? returnTo
+    : Array.isArray(returnTo) && typeof returnTo[0] === 'string'
+      ? returnTo[0]
+      : '/(tabs)/profile';
   const { profile, saveProfile } = useUser();
   const { addNotification } = useAdmin();
-  const [step, setStep] = useState<number>(() => getInitialVerificationStep(profile.selfieUrl, profile.documentUrl, profile.cpf));
-  const [selfieUrl, setSelfieUrl] = useState<string>(profile.selfieUrl || '');
-  const [documentUrl, setDocumentUrl] = useState<string>(profile.documentUrl || '');
-  const [cpfInput, setCpfInput] = useState<string>(formatCPF(profile.cpf || ''));
-  const [cpfDocInput, setCpfDocInput] = useState<string>(formatCPF(profile.cpf || ''));
+  const requiresResubmission = profile.adminReviewStatus === 'rejected'
+    || (profile.isActive === false && profile.adminReviewStatus !== 'pending');
+  const [step, setStep] = useState<number>(() => (
+    requiresResubmission ? 0 : getInitialVerificationStep(profile.selfieUrl, profile.documentUrl, profile.cpf)
+  ));
+  const [selfieUrl, setSelfieUrl] = useState<string>(requiresResubmission ? '' : (profile.selfieUrl || ''));
+  const [documentUrl, setDocumentUrl] = useState<string>(requiresResubmission ? '' : (profile.documentUrl || ''));
+  const [cpfInput, setCpfInput] = useState<string>(requiresResubmission ? '' : formatCPF(profile.cpf || ''));
+  const [cpfDocInput, setCpfDocInput] = useState<string>(requiresResubmission ? '' : formatCPF(profile.cpf || ''));
   const [cpfValid, setCpfValid] = useState<boolean>(false);
   const [cpfDocValid, setCpfDocValid] = useState<boolean>(false);
   const [cpfMatch, setCpfMatch] = useState<boolean>(false);
@@ -101,12 +111,21 @@ export default function IdentityVerifyScreen() {
   }, [step]);
 
   useEffect(() => {
+    if (requiresResubmission) {
+      setSelfieUrl('');
+      setDocumentUrl('');
+      setCpfInput('');
+      setCpfDocInput('');
+      setStep(0);
+      return;
+    }
+
     setSelfieUrl(profile.selfieUrl || '');
     setDocumentUrl(profile.documentUrl || '');
     setCpfInput(formatCPF(profile.cpf || ''));
     setCpfDocInput(formatCPF(profile.cpf || ''));
     setStep(getInitialVerificationStep(profile.selfieUrl, profile.documentUrl, profile.cpf));
-  }, [profile.selfieUrl, profile.documentUrl, profile.cpf]);
+  }, [requiresResubmission, profile.selfieUrl, profile.documentUrl, profile.cpf]);
 
   useEffect(() => {
     cropZoomRef.current = cropZoom;
@@ -377,6 +396,7 @@ export default function IdentityVerifyScreen() {
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await saveProfile({
         ...profile,
+        isActive: undefined,
         identityVerified: false,
         adminReviewStatus: 'pending',
         adminReviewedAt: undefined,
@@ -432,7 +452,7 @@ export default function IdentityVerifyScreen() {
           <Animated.Text style={[v.successTtl, { opacity: opacityAnim }]}>Enviado para análise!</Animated.Text>
           <Animated.Text style={[v.successDesc, { opacity: opacityAnim }]}>Seus documentos foram enviados. O perfil e a carteira só mostrarão Verificado quando o admin ativar sua conta.</Animated.Text>
           <Animated.View style={{ opacity: opacityAnim }}>
-            <TouchableOpacity style={v.doneBtn} onPress={() => router.back()} activeOpacity={0.8}>
+            <TouchableOpacity style={v.doneBtn} onPress={() => router.replace(resolvedReturnTo)} activeOpacity={0.8}>
               <LinearGradient colors={[Colors.dark.neonGreen, Colors.dark.neonGreenDim]} style={v.doneBtnG}>
                 <Text style={v.doneBtnT}>CONCLUIR</Text>
               </LinearGradient>
@@ -451,6 +471,7 @@ export default function IdentityVerifyScreen() {
           <Shield size={32} color={Colors.dark.neonGreen} />
           <Text style={v.headerTtl}>Verificacao de Identidade</Text>
           <Text style={v.headerDesc}>Para sua seguranca, precisamos verificar sua identidade antes de permitir saques. Tenha um RG ou CNH disponível.</Text>
+          {requiresResubmission ? <Text style={v.reviewHint}>Sua conta foi desativada. Envie novamente selfie, documento e CPF para nova análise.</Text> : null}
           {profile.adminReviewStatus === 'pending' ? <Text style={v.reviewHint}>Documentos em análise. Toque nas etapas para revisar ou substituir selfie, documento e CPF.</Text> : null}
         </View>
 

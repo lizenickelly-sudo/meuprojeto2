@@ -271,6 +271,10 @@ export default function WalletScreen() {
   const [sharedPromotions, setSharedPromotions] = useState<Array<{ id: string; title: string; likes: number; shares: number; sharedAt: string }>>([]);
   const isIdentityVerified = useMemo(() => isUserVerificationApproved(profile), [profile.isActive, profile.adminReviewStatus]);
   const hasPendingIdentityVerification = useMemo(() => hasPendingUserVerification(profile), [profile.isActive, profile.adminReviewStatus, profile.selfieUrl, profile.documentUrl, profile.cpf]);
+  const needsIdentityResubmission = useMemo(() => (
+    profile.adminReviewStatus === 'rejected'
+    || (profile.isActive === false && profile.adminReviewStatus !== 'pending')
+  ), [profile.isActive, profile.adminReviewStatus]);
 
   const currentCityPrize = profile.city ? cityPrizes[profile.city]?.value : undefined;
   const totalPrizeValue = useMemo(() => {
@@ -356,7 +360,7 @@ export default function WalletScreen() {
 
   const handleVerify = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/identity-verify');
+    router.push({ pathname: '/identity-verify', params: { returnTo: '/(tabs)/wallet' } });
   }, [router]);
 
   const handleSharePromotion = useCallback(async () => {
@@ -553,11 +557,11 @@ export default function WalletScreen() {
           <View style={w.verifyBanner}>
             <Shield size={16} color={Colors.dark.warning} />
             <View style={w.verifyInfo}>
-              <Text style={w.verifyTtl}>Verificação pendente</Text>
-              <Text style={w.verifySub}>Verifique sua identidade para liberar a conta e os saques.</Text>
+              <Text style={w.verifyTtl}>{needsIdentityResubmission ? 'Reenvio de documentos' : 'Verificação pendente'}</Text>
+              <Text style={w.verifySub}>{needsIdentityResubmission ? 'Sua conta foi desativada. Envie novamente seus documentos para nova análise.' : 'Verifique sua identidade para liberar a conta e os saques.'}</Text>
             </View>
             <TouchableOpacity style={w.verifyBtn} onPress={handleVerify} activeOpacity={0.8}>
-              <Text style={w.verifyBtnTxt}>Verificar</Text>
+              <Text style={w.verifyBtnTxt}>{needsIdentityResubmission ? 'Enviar docs' : 'Verificar'}</Text>
             </TouchableOpacity>
           </View>
         )}

@@ -210,5 +210,6 @@ export async function uploadSponsorPromotionalVideo({
     mimeType: resolvedMimeType,
     durationSeconds,
     createdAt: new Date().toISOString(),
+    likes: 0,
   };
 }

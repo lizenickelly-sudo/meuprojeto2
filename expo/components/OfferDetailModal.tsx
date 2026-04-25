@@ -34,6 +34,7 @@ interface OfferDetailModalProps {
   offerList?: Offer[];
   initialIndex?: number;
   startWithComments?: boolean;
+  presentationMode?: 'default' | 'product-card';
   onClose: () => void;
 }
 
@@ -59,8 +60,10 @@ export default function OfferDetailModal({
   offerList,
   initialIndex = 0,
   startWithComments = false,
+  presentationMode = 'default',
   onClose,
 }: OfferDetailModalProps) {
+  const isProductCard = presentationMode === 'product-card';
   const router = useRouter();
   const pathname = usePathname();
   const { sponsors, toggleLikeOffer: rawToggleLike, shareOffer: rawShare, addOfferComment, isOfferLiked, isOfferShared } = useSponsor();
@@ -263,22 +266,35 @@ export default function OfferDetailModal({
   if (!currentOffer) return null;
 
   const currentUserAvatar = profile.avatarUrl || profile.selfieUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=60';
+  const modalPageHeight = isProductCard ? SCREEN_W : contentHeight;
 
   const translateY = slideAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [100, 0],
+    outputRange: [28, 0],
+  });
+
+  const scale = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.84, 1],
   });
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle={isProductCard ? 'overFullScreen' : 'pageSheet'}
+      transparent={isProductCard}
+      onRequestClose={onClose}
+    >
       <KeyboardAvoidingView
-        style={ms.container}
+        style={[ms.container, isProductCard && ms.containerCompact]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
         <Animated.View
-          style={[ms.contentWrap, { opacity: slideAnim, transform: [{ translateY }] }]}
+          style={[ms.contentWrap, isProductCard && ms.contentWrapCompact, { opacity: slideAnim, transform: [{ scale }, { translateY }] }]}
           onLayout={(event) => {
+            if (isProductCard) return;
             const nextHeight = event.nativeEvent.layout.height;
             if (nextHeight > 0 && Math.abs(nextHeight - contentHeight) > 1) {
               setContentHeight(nextHeight);
@@ -299,7 +315,7 @@ export default function OfferDetailModal({
                 keyExtractor={(item, index) => `${item.offer.id}-${index}`}
                 renderItem={({ item }) => (
                   <TouchableOpacity activeOpacity={0.95} onPress={handleImagePress}>
-                    <View style={[ms.reelPage, { height: contentHeight }]}>
+                    <View style={[ms.reelPage, { height: modalPageHeight }]}>
                       <Image
                         source={{ uri: item.offer.imageUrl }}
                         style={ms.reelImage}
@@ -321,7 +337,7 @@ export default function OfferDetailModal({
                 snapToAlignment="start"
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfig}
-                getItemLayout={(_, index) => ({ length: contentHeight, offset: contentHeight * index, index })}
+                getItemLayout={(_, index) => ({ length: modalPageHeight, offset: modalPageHeight * index, index })}
                 initialNumToRender={2}
                 maxToRenderPerBatch={2}
                 windowSize={3}
@@ -414,7 +430,7 @@ export default function OfferDetailModal({
           )}
         </Animated.View>
 
-        <View style={ms.commentInputWrap}>
+        <View style={[ms.commentInputWrap, isProductCard && ms.commentInputWrapCompact]}>
           <Image
             source={{ uri: currentUserAvatar }}
             style={ms.inputAvatar}
@@ -447,12 +463,24 @@ const ms = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.dark.background,
   },
+  containerCompact: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.48)',
+  },
   contentWrap: {
     flex: 1,
     overflow: 'hidden',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     backgroundColor: Colors.dark.background,
+  },
+  contentWrapCompact: {
+    flex: 0,
+    flexGrow: 0,
+    flexShrink: 0,
+    height: SCREEN_W,
+    width: SCREEN_W,
   },
   feedContainer: {
     flex: 1,
@@ -583,6 +611,12 @@ const ms = StyleSheet.create({
     borderTopColor: Colors.dark.cardBorder,
     backgroundColor: Colors.dark.surface,
     gap: 10,
+  },
+  commentInputWrapCompact: {
+    width: SCREEN_W,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
   },
   inputAvatar: {
     width: 32,

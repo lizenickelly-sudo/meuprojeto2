@@ -130,7 +130,13 @@ function SponsorListItem({
     : 'Sem avaliacoes';
 
   return (
-    <View style={sl.card} testID={`sponsor-list-${sponsor.id}`}>
+    <LinearGradient
+      colors={['rgba(244,247,250,0.94)', 'rgba(221,228,236,0.9)', 'rgba(186,197,209,0.88)']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={sl.card}
+      testID={`sponsor-list-${sponsor.id}`}
+    >
       <TouchableOpacity style={sl.mainTap} onPress={onPress} activeOpacity={0.75}>
         <View style={sl.logoWrap}>
           <Image source={{ uri: sponsor.logoUrl }} style={sl.logo} contentFit="cover" cachePolicy="memory-disk" />
@@ -167,14 +173,14 @@ function SponsorListItem({
 
       <View style={sl.rightActions}>
         <TouchableOpacity style={sl.iconBtn} onPress={onToggleLike} activeOpacity={0.8}>
-          <Heart size={16} color={liked ? '#EF4444' : '#9CA3AF'} fill={liked ? '#EF4444' : 'transparent'} />
+          <Heart size={16} color={liked ? '#DC2626' : '#475569'} fill={liked ? '#DC2626' : 'transparent'} />
         </TouchableOpacity>
         <TouchableOpacity style={sl.iconBtn} onPress={onToggleStar} activeOpacity={0.8}>
-          <Star size={16} color={starred ? '#F59E0B' : '#9CA3AF'} fill={starred ? '#F59E0B' : 'transparent'} />
+          <Star size={16} color={starred ? '#D97706' : '#475569'} fill={starred ? '#D97706' : 'transparent'} />
         </TouchableOpacity>
         <Text style={sl.starsTiny}>{starsLabel}</Text>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -188,8 +194,12 @@ const sl = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(8,12,24,0.52)',
+    borderColor: 'rgba(255,255,255,0.5)',
+    shadowColor: 'rgba(15,23,42,0.24)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 6,
   },
   mainTap: {
     flex: 1,
@@ -201,9 +211,9 @@ const sl = StyleSheet.create({
     height: 58,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.56)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.7)',
   },
   logo: {
     width: '100%',
@@ -226,18 +236,19 @@ const sl = StyleSheet.create({
     gap: 6,
   },
   hotBadge: {
-    color: '#FB7185',
+    color: '#BE123C',
     fontSize: 10,
     fontWeight: '700' as const,
   },
   verifiedBadge: {
-    color: 'rgba(226,232,240,0.72)',
+    color: 'rgba(51,65,85,0.76)',
     fontSize: 10,
+    fontWeight: '700' as const,
   },
   name: {
-    color: '#F8FAFC',
+    color: '#0F172A',
     fontSize: 15,
-    fontWeight: '700' as const,
+    fontWeight: '800' as const,
     flexShrink: 1,
     marginBottom: 1,
   },
@@ -247,17 +258,18 @@ const sl = StyleSheet.create({
     gap: 3,
   },
   metaStrong: {
-    color: '#F59E0B',
+    color: '#B45309',
     fontSize: 11,
-    fontWeight: '700' as const,
+    fontWeight: '800' as const,
   },
   metaDot: {
-    color: 'rgba(226,232,240,0.62)',
+    color: 'rgba(71,85,105,0.58)',
     fontSize: 10,
   },
   metaText: {
-    color: 'rgba(226,232,240,0.72)',
+    color: 'rgba(51,65,85,0.82)',
     fontSize: 11,
+    fontWeight: '600' as const,
   },
   bottomRow: {
     flexDirection: 'row',
@@ -266,8 +278,9 @@ const sl = StyleSheet.create({
     marginTop: 2,
   },
   categoryText: {
-    color: 'rgba(226,232,240,0.72)',
+    color: 'rgba(30,41,59,0.82)',
     fontSize: 11,
+    fontWeight: '700' as const,
     flex: 1,
   },
   rightActions: {
@@ -281,14 +294,15 @@ const sl = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(148,163,184,0.34)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.44)',
   },
   starsTiny: {
-    color: 'rgba(226,232,240,0.68)',
+    color: 'rgba(51,65,85,0.78)',
     fontSize: 9,
+    fontWeight: '700' as const,
     maxWidth: 56,
     textAlign: 'center',
   },

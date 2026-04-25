@@ -169,6 +169,30 @@ function buildSponsorRatingSummary(ratingsByUser: Record<string, number>) {
   };
 }
 
+function normalizePromotionalVideos(value: unknown, sponsorId: string, updatedAt?: string | null): NonNullable<Sponsor['promotionalVideos']> {
+  if (!Array.isArray(value)) return [];
+
+  return value.reduce<NonNullable<Sponsor['promotionalVideos']>>((acc, item, index) => {
+    const data = toRecord(item);
+    const url = String(data.url || '');
+    if (!url) return acc;
+
+    acc.push({
+      id: String(data.id || `${sponsorId}_video_${index}`),
+      url,
+      storagePath: data.storagePath ? String(data.storagePath) : undefined,
+      title: data.title ? String(data.title) : undefined,
+      fileName: data.fileName ? String(data.fileName) : undefined,
+      mimeType: data.mimeType ? String(data.mimeType) : undefined,
+      durationSeconds: data.durationSeconds === undefined || data.durationSeconds === null ? undefined : toFiniteNumber(data.durationSeconds, 0),
+      createdAt: String(data.createdAt || updatedAt || new Date().toISOString()),
+      likes: toFiniteNumber(data.likes, 0),
+    });
+
+    return acc;
+  }, []);
+}
+
 function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
   const data = toRecord(row.data);
   const sponsorId = row.id || String(data.id || '');
@@ -180,9 +204,9 @@ function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
   const ratingsByUser = normalizeSponsorRatingsByUser(data.ratingsByUser);
   const ratingSummary = buildSponsorRatingSummary(ratingsByUser);
   const promotionalVideos = Array.isArray(data.promotionalVideos)
-    ? data.promotionalVideos
+    ? normalizePromotionalVideos(data.promotionalVideos, sponsorId, row.updated_at)
     : row.video_url
-      ? [{ id: `${sponsorId}_video`, url: row.video_url, createdAt: row.updated_at || new Date().toISOString() }]
+      ? [{ id: `${sponsorId}_video`, url: row.video_url, createdAt: row.updated_at || new Date().toISOString(), likes: 0 }]
       : [];
 
   return {

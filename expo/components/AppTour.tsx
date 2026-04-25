@@ -15,7 +15,6 @@ import {
   Smartphone,
   Gift,
   Wallet,
-  Share2,
   ArrowRight,
   X,
   ScanLine,
@@ -79,20 +78,6 @@ const SLIDES: TourSlide[] = [
     ],
     accentColor: '#22C55E',
     bgGradient: ['#14532D', '#22C55E', '#14532D'],
-  },
-  {
-    id: 'points',
-    icon: <Share2 size={48} color="#FFF" />,
-    title: 'Ganhe Pontos',
-    subtitle: 'Compartilhe e converta em PIX',
-    bullets: [
-      'Compartilhe ofertas nas redes sociais',
-      'Ganhe pontos por cada compartilhamento',
-      'Convide amigos e ganhe bônus extra',
-      'Transforme seus pontos em saldo PIX!',
-    ],
-    accentColor: '#F97316',
-    bgGradient: ['#7C2D12', '#F97316', '#7C2D12'],
   },
 ];
 
@@ -209,12 +194,6 @@ export default function AppTour({ onClose }: AppTourProps) {
               <View style={styles.tipCard}>
                 <TrendingUp size={18} color={s.accentColor} />
                 <Text style={styles.tipText}>Sem taxa! O valor vai direto pra você.</Text>
-              </View>
-            )}
-            {idx === 3 && (
-              <View style={styles.tipCard}>
-                <Share2 size={18} color={s.accentColor} />
-                <Text style={styles.tipText}>1 compartilhamento = 10 pontos = R$ 0,10</Text>
               </View>
             )}
           </View>

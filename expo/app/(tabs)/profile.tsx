@@ -78,12 +78,24 @@ export default function ProfileScreen() {
   const { logout } = useAuth();
   const isIdentityVerified = useMemo(() => isUserVerificationApproved(profile), [profile.isActive, profile.adminReviewStatus]);
   const hasPendingIdentityVerification = useMemo(() => hasPendingUserVerification(profile), [profile.isActive, profile.adminReviewStatus, profile.selfieUrl, profile.documentUrl, profile.cpf]);
+  const needsIdentityResubmission = useMemo(() => (
+    profile.adminReviewStatus === 'rejected'
+    || (profile.isActive === false && profile.adminReviewStatus !== 'pending')
+  ), [profile.isActive, profile.adminReviewStatus]);
   const accountActivation = useMemo(() => {
     if (profile.isActive === true || profile.adminReviewStatus === 'approved') {
       return {
         label: 'Ativado',
         description: 'Conta liberada pelo administrador.',
         variant: 'active' as const,
+      };
+    }
+
+    if (profile.adminReviewStatus === 'pending') {
+      return {
+        label: 'Pendente',
+        description: 'Aguardando nova análise e ativação pelo administrador.',
+        variant: 'pending' as const,
       };
     }
 
@@ -155,7 +167,7 @@ export default function ProfileScreen() {
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }, []);
   const openIdentityVerification = useCallback(() => {
-    router.push('/identity-verify');
+    router.push({ pathname: '/identity-verify', params: { returnTo: '/(tabs)/profile' } });
   }, [router]);
 
   const handleCpfChange = useCallback((newCpf: string) => {
@@ -313,7 +325,7 @@ export default function ProfileScreen() {
               <Text style={s.profileName}>{profile.name || 'Visitante'}</Text>
               {profile.city ? <View style={s.locationRow}><MapPin size={13} color={PROFILE_THEME.textSecondary} /><Text style={s.profileLocation}>{profile.city}, {profile.state}</Text></View> : <Text style={s.profileLocation}>Localização não definida</Text>}
               {!ed && !isIdentityVerified && !hasPendingIdentityVerification && (
-                <TouchableOpacity style={s.verifyBtn} onPress={openIdentityVerification}><Shield size={13} color="#000" /><Text style={s.verifyBtnText}>Verificar</Text></TouchableOpacity>
+                <TouchableOpacity style={s.verifyBtn} onPress={openIdentityVerification}><Shield size={13} color="#000" /><Text style={s.verifyBtnText}>{needsIdentityResubmission ? 'Enviar docs' : 'Verificar'}</Text></TouchableOpacity>
               )}
               {isIdentityVerified && <View style={s.verifiedInline}><BadgeCheck size={13} color={Colors.dark.success} /><Text style={s.verifiedInlineText}>Verificado</Text></View>}
             </View>
@@ -383,8 +395,8 @@ export default function ProfileScreen() {
           <View style={[s.sectionHeader, s.sectionHeaderExpanded]}><View style={s.sectionHeaderMain}><Shield size={18} color={Colors.dark.primary} /><Text style={s.sectionTitle}>Segurança</Text></View></View>
           <View style={s.sectionBody}>
             <View style={s.securityRow}>
-              <View style={s.securityInfo}><Text style={s.securityLabel}>Verificação de Identidade</Text><Text style={s.securityDesc}>{isIdentityVerified ? 'Conta verificada e ativada' : hasPendingIdentityVerification ? 'Documentos enviados. Toque no botão ao lado para editar selfie, documento e CPF.' : 'Verifique para sacar'}</Text></View>
-              {isIdentityVerified ? <View style={s.verifiedTag}><BadgeCheck size={14} color={Colors.dark.success} /><Text style={s.verifiedTagText}>Verificado</Text></View> : hasPendingIdentityVerification ? <TouchableOpacity style={s.pendingTag} onPress={openIdentityVerification} activeOpacity={0.8}><AlertTriangle size={14} color={Colors.dark.warning} /><View style={s.pendingTagTextWrap}><Text style={s.pendingTagText}>Em análise</Text><Text style={s.pendingTagHint}>Mandar doc</Text></View></TouchableOpacity> : <TouchableOpacity style={s.verifyActionBtn} onPress={openIdentityVerification}><Text style={s.verifyActionText}>Verificar</Text></TouchableOpacity>}
+                <View style={s.securityInfo}><Text style={s.securityLabel}>Verificação de Identidade</Text><Text style={s.securityDesc}>{isIdentityVerified ? 'Conta verificada e ativada' : hasPendingIdentityVerification ? 'Documentos enviados. Toque no botão ao lado para editar selfie, documento e CPF.' : needsIdentityResubmission ? 'Conta desativada. Envie selfie, documento e CPF novamente para nova análise.' : 'Verifique para sacar'}</Text></View>
+                {isIdentityVerified ? <View style={s.verifiedTag}><BadgeCheck size={14} color={Colors.dark.success} /><Text style={s.verifiedTagText}>Verificado</Text></View> : hasPendingIdentityVerification ? <TouchableOpacity style={s.pendingTag} onPress={openIdentityVerification} activeOpacity={0.8}><AlertTriangle size={14} color={Colors.dark.warning} /><View style={s.pendingTagTextWrap}><Text style={s.pendingTagText}>Em análise</Text><Text style={s.pendingTagHint}>Mandar doc</Text></View></TouchableOpacity> : <TouchableOpacity style={s.verifyActionBtn} onPress={openIdentityVerification}><Text style={s.verifyActionText}>{needsIdentityResubmission ? 'Enviar docs' : 'Verificar'}</Text></TouchableOpacity>}
             </View>
             <View style={[s.securityRow, s.securityRowSeparated]}>
               <View style={s.securityInfo}>

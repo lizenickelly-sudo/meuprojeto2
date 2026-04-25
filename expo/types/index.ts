@@ -60,6 +60,7 @@ export interface SponsorVideo {
   mimeType?: string;
   durationSeconds?: number;
   createdAt: string;
+  likes?: number;
 }
 
 export interface Sponsor {
