@@ -33,6 +33,10 @@ function buildTicketId(batchId: string, code: string): string {
   return `${batchId}_${normalizedCode}`;
 }
 
+function isSponsorTicketStatus(value: unknown): value is SponsorTicketRecord['status'] {
+  return value === 'available' || value === 'pending_payment' || value === 'paid' || value === 'refused';
+}
+
 function parseCouponPayload(rawData: string): { code: string; batchId: string; sponsorId: string; sponsorName: string; value: number } | null {
   try {
     const parsed = JSON.parse(rawData);
@@ -276,50 +280,13 @@ export const [SponsorPortalProvider, useSponsorPortal] = createContextHook(() =>
       status: 'available',
     };
 
-    const normalizedProfileEmail = normalizeEmail(profile.email || '');
-
     if (nextBase.status === 'paid') {
-      const paidTicket = {
+      const approvedTicket = {
         ...nextBase,
         lastScannedAt: new Date().toISOString(),
       };
-      await upsertTicket(paidTicket);
-      return { outcome: 'refused', message: 'Cupom ja utilizado. Este bilhete ja foi pago e registrado.' };
-    }
-
-    if (nextBase.status === 'refused') {
-      return {
-        outcome: 'refused',
-        message: nextBase.refusalReason || 'Bilhete recusado pelo patrocinador.',
-      };
-    }
-
-    if (nextBase.status === 'pending_payment') {
-      const existingCustomerEmail = normalizeEmail(nextBase.customerEmail || '');
-      if (existingCustomerEmail && normalizedProfileEmail && existingCustomerEmail !== normalizedProfileEmail) {
-        return {
-          outcome: 'refused',
-          message: 'Bilhete recusado. Este QR ja foi solicitado por outro usuario e aguarda pagamento.',
-        };
-      }
-
-      const pendingTicket: SponsorTicketRecord = {
-        ...nextBase,
-        customerEmail: profile.email,
-        customerName: profile.name,
-        customerPixKey: profile.pixKey,
-        customerPixKeyType: profile.pixKeyType,
-        paymentRequestedAt: nextBase.paymentRequestedAt || new Date().toISOString(),
-        lastScannedAt: new Date().toISOString(),
-        refusalReason: 'Aguardando pagamento do patrocinador.',
-      };
-
-      await upsertTicket(pendingTicket);
-      return {
-        outcome: 'pending',
-        ticket: pendingTicket,
-        message: 'Bilhete recusado por enquanto. O PIX do cliente foi enviado ao patrocinador e o pagamento ainda nao foi confirmado.',
-      };
+      await upsertTicket(approvedTicket);
+      return { outcome: 'approved', ticket: approvedTicket };
     }
 
     const nextTicket: SponsorTicketRecord = {

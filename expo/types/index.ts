@@ -101,6 +101,30 @@ export interface Sponsor {
   sponsorPanelEnabledAt?: string;
 }
 
+export type SponsorTicketStatus = 'available' | 'pending_payment' | 'paid' | 'refused';
+
+export interface SponsorTicketRecord {
+  id: string;
+  sponsorId: string;
+  sponsorName: string;
+  batchId: string;
+  code: string;
+  value: number;
+  createdAt: string;
+  registeredAt?: string;
+  lastScannedAt?: string;
+  status: SponsorTicketStatus;
+  customerEmail?: string;
+  customerName?: string;
+  customerPixKey?: string;
+  customerPixKeyType?: 'cpf' | 'phone' | 'email' | 'random';
+  paymentRequestedAt?: string;
+  paidAt?: string;
+  paidBySponsorAt?: string;
+  paidMessage?: string;
+  refusalReason?: string;
+}
+
 export interface CityBonusMissionNotificationMetadata {
   kind?: 'lottery_claim' | 'identity_verification' | 'city_bonus';
   sponsorId?: string;
@@ -215,30 +239,6 @@ export interface CouponBatch {
   prefix: string;
   createdAt: string;
   codes: string[];
-}
-
-export type SponsorTicketStatus = 'available' | 'pending_payment' | 'paid' | 'refused';
-
-export interface SponsorTicketRecord {
-  id: string;
-  sponsorId: string;
-  sponsorName: string;
-  batchId: string;
-  code: string;
-  value: number;
-  createdAt: string;
-  registeredAt?: string;
-  lastScannedAt?: string;
-  status: SponsorTicketStatus;
-  customerEmail?: string;
-  customerName?: string;
-  customerPixKey?: string;
-  customerPixKeyType?: 'cpf' | 'phone' | 'email' | 'random';
-  paymentRequestedAt?: string;
-  paidAt?: string;
-  paidBySponsorAt?: string;
-  paidMessage?: string;
-  refusalReason?: string;
 }
 
 export interface AdminNotification {

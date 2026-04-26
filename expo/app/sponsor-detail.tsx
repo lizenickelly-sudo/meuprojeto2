@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform, Linking } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { MapPin, Phone, BadgeCheck, Grid3x3, ShoppingBag, MessageSquare, Heart, Send, Star } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -15,7 +15,6 @@ const GRID_GAP = 4;
 const GRID_COLS = 3;
 const GRID_HORIZONTAL_PADDING = 12;
 const GRID_ITEM_SIZE = (SCREEN_W - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
-const CARD_BORDER_BLUE = '#3B82F6';
 
 const STORE_THEME = {
   textPrimary: '#F8FAFC',
@@ -48,6 +47,7 @@ function openDirections(address: string, lat?: number, lon?: number) {
 export default function SponsorDetailScreen() {
   console.log("[SponsorDetail] Sponsor detail initialized");
   const { sponsorId } = useLocalSearchParams<{ sponsorId: string }>();
+  const router = useRouter();
   const { sponsors } = useSponsor();
   const sponsor = sponsors.find((s) => s.id === sponsorId);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
@@ -103,6 +103,12 @@ export default function SponsorDetailScreen() {
     const destinationAddress = [sponsor.address, sponsor.city, sponsor.state].filter(Boolean).join(', ');
     openDirections(destinationAddress, sponsor.latitude, sponsor.longitude);
   }, [sponsor]);
+
+  const handleOpenSponsorAdmin = useCallback(() => {
+    if (!sponsor) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({ pathname: '/sponsor-admin', params: { sponsorId: sponsor.id } });
+  }, [router, sponsor]);
 
   if (!sponsor) {
     return (
@@ -180,9 +186,14 @@ export default function SponsorDetailScreen() {
                   )}
                 </View>
               </View>
-              <TouchableOpacity style={d.inlineGoBtn} onPress={handleGoLocation} activeOpacity={0.8}>
-                <Text style={d.inlineGoBtnTxt}>Ir para</Text>
-              </TouchableOpacity>
+              <View style={d.inlineActionsCol}>
+                <TouchableOpacity style={d.inlineGoBtn} onPress={handleGoLocation} activeOpacity={0.8}>
+                  <Text style={d.inlineGoBtnTxt}>Ir para</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={d.inlinePanelBtn} onPress={handleOpenSponsorAdmin} activeOpacity={0.8}>
+                  <Text style={d.inlinePanelBtnTxt}>Painel</Text>
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={d.bioDesc} numberOfLines={2}>{sponsor.description}</Text>
             <View style={d.bioMeta}>
@@ -467,6 +478,11 @@ const d = StyleSheet.create({
     fontWeight: '600' as const,
     lineHeight: 18,
   },
+  inlineActionsCol: {
+    alignItems: 'flex-end',
+    gap: 8,
+    marginTop: 7,
+  },
   inlineGoBtn: {
     minWidth: 58,
     height: 28,
@@ -488,6 +504,24 @@ const d = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800' as const,
     letterSpacing: 0.8,
+    textTransform: 'uppercase' as const,
+  },
+  inlinePanelBtn: {
+    minWidth: 58,
+    height: 28,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlinePanelBtnTxt: {
+    color: STORE_THEME.textPrimary,
+    fontSize: 11,
+    fontWeight: '800' as const,
+    letterSpacing: 0.4,
     textTransform: 'uppercase' as const,
   },
 

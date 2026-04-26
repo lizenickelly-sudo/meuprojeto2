@@ -71,6 +71,7 @@ export default function SponsorAdminScreen() {
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [manualPayload, setManualPayload] = useState<string>('');
+  const [feedback, setFeedback] = useState<string>('');
   const [loginPending, setLoginPending] = useState<boolean>(false);
   const [scanLocked, setScanLocked] = useState<boolean>(false);
   const [payingTicketId, setPayingTicketId] = useState<string>('');
@@ -92,19 +93,18 @@ export default function SponsorAdminScreen() {
 
   const handleLogin = useCallback(async () => {
     setLoginPending(true);
+    setFeedback('');
     try {
       const result = await login(email, password);
       if (!result.ok) {
-        if (Platform.OS !== 'web') {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        }
-        Alert.alert('Erro', result.message || 'Nao foi possivel entrar no painel do patrocinador.');
+        setFeedback(result.message || 'Nao foi possivel entrar no painel do patrocinador.');
         return;
       }
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       setPassword('');
+      setFeedback('Acesso liberado para o patrocinador.');
     } finally {
       setLoginPending(false);
     }
@@ -114,18 +114,15 @@ export default function SponsorAdminScreen() {
     const normalized = rawPayload.trim();
     if (!normalized) return;
     const result = await registerTicketFromQr(normalized);
+    setFeedback(result.message);
     if (result.ok) {
       setManualPayload('');
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      return;
-    }
-
-    if (Platform.OS !== 'web') {
+    } else if (Platform.OS !== 'web') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
-    Alert.alert('Erro', result.message);
   }, [registerTicketFromQr]);
 
   const handleBarcodeScanned = useCallback(async ({ data }: { data?: string }) => {
@@ -179,7 +176,12 @@ export default function SponsorAdminScreen() {
               <ShieldCheck size={28} color={Colors.dark.primary} />
             </View>
             <Text style={s.heroEyebrow}>Acesso da loja</Text>
-            <Text style={s.heroTitle}>{requestedSponsor?.name || 'Painel do Patrocinador'}</Text>
+            <Text style={s.heroTitle}>Painel do Patrocinador</Text>
+            <Text style={s.heroSubtitle}>
+              {requestedSponsor
+                ? `Acesse a area da loja ${requestedSponsor.name} com o e-mail e a senha definidos no admin principal.`
+                : 'Acesse com o e-mail e a senha configurados no admin principal para escanear bilhetes e confirmar pagamentos.'}
+            </Text>
           </View>
 
           <View style={s.formCard}>
@@ -204,6 +206,8 @@ export default function SponsorAdminScreen() {
               secureTextEntry
             />
 
+            {feedback ? <Text style={s.feedbackText}>{feedback}</Text> : null}
+
             <TouchableOpacity style={s.loginButton} onPress={handleLogin} activeOpacity={0.8} disabled={loginPending}>
               <LinearGradient colors={[Colors.dark.primary, Colors.dark.primaryDim]} style={s.loginButtonGradient}>
                 <ShieldCheck size={18} color="#000" />
@@ -218,6 +222,7 @@ export default function SponsorAdminScreen() {
             <View style={{ flex: 1 }}>
               <Text style={s.panelEyebrow}>Painel do patrocinador</Text>
               <Text style={s.panelTitle}>{currentSponsor?.name || 'Patrocinador'}</Text>
+              <Text style={s.panelSubtitle}>Bilhetes da loja, pagamentos pendentes e QR codes do admin principal.</Text>
             </View>
             <TouchableOpacity style={s.logoutButton} onPress={logout} activeOpacity={0.8}>
               <LogOut size={16} color={Colors.dark.text} />
@@ -233,9 +238,13 @@ export default function SponsorAdminScreen() {
 
           <View style={s.sectionCard}>
             <Text style={s.sectionTitle}>Escanear e Salvar QR do Admin</Text>
+            <Text style={s.sectionSubtitle}>Escaneie ou cole o QR gerado no admin principal para registrar o bilhete neste patrocinador.</Text>
 
             {Platform.OS === 'web' ? (
-              null
+              <View style={s.webHintCard}>
+                <ScanLine size={18} color={Colors.dark.primary} />
+                <Text style={s.webHintText}>No web, cole abaixo o JSON do QR para salvar o bilhete.</Text>
+              </View>
             ) : !cameraPermission?.granted ? (
               <TouchableOpacity style={s.permissionButton} onPress={handleRequestPermission} activeOpacity={0.8}>
                 <ScanLine size={18} color={Colors.dark.primary} />
@@ -251,6 +260,7 @@ export default function SponsorAdminScreen() {
                 />
                 <View style={s.cameraOverlay}>
                   <View style={s.scanFrame} />
+                  <Text style={s.cameraHelp}>{scanLocked ? 'Bilhete lido. Aguarde...' : 'Aponte para o QR do bilhete'}</Text>
                 </View>
               </View>
             )}
@@ -267,14 +277,18 @@ export default function SponsorAdminScreen() {
             <TouchableOpacity style={s.secondaryButton} onPress={() => handleRegisterPayload(manualPayload)} activeOpacity={0.8}>
               <Text style={s.secondaryButtonText}>Salvar bilhete no painel</Text>
             </TouchableOpacity>
+
+            {feedback ? <Text style={s.feedbackText}>{feedback}</Text> : null}
           </View>
 
           <View style={s.sectionCard}>
             <Text style={s.sectionTitle}>Bilhetes aguardando pagamento</Text>
+            <Text style={s.sectionSubtitle}>Quando o cliente escaneia um bilhete, o PIX dele aparece aqui para o patrocinador pagar.</Text>
 
             {pendingTickets.length === 0 ? (
               <View style={s.emptyState}>
                 <Wallet size={24} color={Colors.dark.textMuted} />
+                <Text style={s.emptyStateText}>Nenhum bilhete aguardando pagamento.</Text>
               </View>
             ) : (
               pendingTickets.map((ticket) => (
@@ -301,10 +315,12 @@ export default function SponsorAdminScreen() {
 
           <View style={s.sectionCard}>
             <Text style={s.sectionTitle}>Todos os bilhetes do patrocinador</Text>
+            <Text style={s.sectionSubtitle}>Visao geral do que foi gerado no admin principal e do que ja foi pago ou nao.</Text>
 
             {visibleTickets.length === 0 ? (
               <View style={s.emptyState}>
                 <TriangleAlert size={22} color={Colors.dark.textMuted} />
+                <Text style={s.emptyStateText}>Nenhum bilhete disponivel para este patrocinador.</Text>
               </View>
             ) : (
               visibleTickets.map((ticket) => (
@@ -370,6 +386,12 @@ const s = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 10,
   },
+  heroSubtitle: {
+    color: PANEL_THEME.textSecondary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    lineHeight: 19,
+  },
   formCard: {
     borderRadius: 18,
     padding: 18,
@@ -400,6 +422,13 @@ const s = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: 'top',
     marginTop: 14,
+  },
+  feedbackText: {
+    color: Colors.dark.primary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    marginTop: 12,
+    lineHeight: 19,
   },
   loginButton: {
     marginTop: 16,
@@ -441,6 +470,13 @@ const s = StyleSheet.create({
     fontSize: 25,
     fontWeight: '900' as const,
     lineHeight: 28,
+  },
+  panelSubtitle: {
+    color: PANEL_THEME.textSecondary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    marginTop: 4,
+    lineHeight: 19,
   },
   logoutButton: {
     flexDirection: 'row',
@@ -505,6 +541,31 @@ const s = StyleSheet.create({
     fontWeight: '800' as const,
     letterSpacing: 0.2,
   },
+  sectionSubtitle: {
+    color: PANEL_THEME.textSecondary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    marginTop: 6,
+    lineHeight: 19,
+  },
+  webHintCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: Colors.dark.primaryFaint,
+    borderWidth: 1,
+    borderColor: Colors.dark.neonGreenBorder,
+    marginTop: 14,
+  },
+  webHintText: {
+    flex: 1,
+    color: Colors.dark.primary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    lineHeight: 19,
+  },
   permissionButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -546,6 +607,13 @@ const s = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: 'transparent',
   },
+  cameraHelp: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700' as const,
+    letterSpacing: 0.2,
+    marginTop: 18,
+  },
   secondaryButton: {
     marginTop: 12,
     borderRadius: 12,
@@ -563,7 +631,14 @@ const s = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
     paddingVertical: 24,
+  },
+  emptyStateText: {
+    color: PANEL_THEME.textMuted,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    lineHeight: 19,
   },
   ticketCard: {
     marginTop: 14,

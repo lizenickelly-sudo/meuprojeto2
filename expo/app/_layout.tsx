@@ -53,6 +53,10 @@ function RootLayoutNav() {
         options={{ title: "Patrocinador" }}
       />
       <Stack.Screen
+        name="sponsor-admin"
+        options={{ title: "Painel do Patrocinador", presentation: "modal" }}
+      />
+      <Stack.Screen
         name="withdraw"
         options={{ title: "Sacar PIX", presentation: "modal" }}
       />
