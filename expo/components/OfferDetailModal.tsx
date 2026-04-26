@@ -123,12 +123,13 @@ export default function OfferDetailModal({
     if (!visible || modalEntries.length === 0 || contentHeight <= 0) return;
 
     const safeInitial = Math.min(Math.max(initialIndex, 0), modalEntries.length - 1);
+    const initialOffset = safeInitial * (isProductCard ? PRODUCT_CARD_SNAP_INTERVAL : contentHeight);
     const timeoutId = setTimeout(() => {
-      offerPagerRef.current?.scrollToOffset({ offset: safeInitial * contentHeight, animated: false });
+      offerPagerRef.current?.scrollToOffset({ offset: initialOffset, animated: false });
     }, 0);
 
     return () => clearTimeout(timeoutId);
-  }, [visible, initialIndex, modalEntries.length, contentHeight]);
+  }, [visible, initialIndex, modalEntries.length, contentHeight, isProductCard]);
 
   React.useEffect(() => {
     if (currentOffer) {
