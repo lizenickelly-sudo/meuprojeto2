@@ -26,12 +26,6 @@ import type { Offer, Sponsor } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const MODAL_MEDIA_HEIGHT = SCREEN_W * 0.85;
-const PRODUCT_CARD_WIDTH = SCREEN_W - 88;
-const PRODUCT_CARD_HEIGHT = PRODUCT_CARD_WIDTH * 1.22;
-const PRODUCT_CARD_EDGE_PEEK = 34;
-const PRODUCT_CARD_SNAP_GAP = 18;
-const PRODUCT_CARD_SNAP_INTERVAL = PRODUCT_CARD_HEIGHT + PRODUCT_CARD_SNAP_GAP;
-const PRODUCT_CARD_VIEWPORT_HEIGHT = PRODUCT_CARD_SNAP_INTERVAL + PRODUCT_CARD_EDGE_PEEK * 2;
 
 interface OfferDetailModalProps {
   visible: boolean;
@@ -111,6 +105,9 @@ export default function OfferDetailModal({
   const currentEntry = modalEntries[activeIndex] || modalEntries[0] || null;
   const currentOffer = currentEntry?.offer || offer;
   const currentSponsor = currentEntry?.sponsor || sponsor;
+  const currentSponsorAddress = [currentSponsor?.address, currentSponsor ? `${currentSponsor.city} - ${currentSponsor.state}` : '']
+    .filter(Boolean)
+    .join(' • ');
 
   React.useEffect(() => {
     if (visible && modalEntries.length > 0) {
@@ -123,13 +120,12 @@ export default function OfferDetailModal({
     if (!visible || modalEntries.length === 0 || contentHeight <= 0) return;
 
     const safeInitial = Math.min(Math.max(initialIndex, 0), modalEntries.length - 1);
-    const initialOffset = safeInitial * (isProductCard ? PRODUCT_CARD_SNAP_INTERVAL : contentHeight);
     const timeoutId = setTimeout(() => {
-      offerPagerRef.current?.scrollToOffset({ offset: initialOffset, animated: false });
+      offerPagerRef.current?.scrollToOffset({ offset: safeInitial * contentHeight, animated: false });
     }, 0);
 
     return () => clearTimeout(timeoutId);
-  }, [visible, initialIndex, modalEntries.length, contentHeight, isProductCard]);
+  }, [visible, initialIndex, modalEntries.length, contentHeight]);
 
   React.useEffect(() => {
     if (currentOffer) {
@@ -213,6 +209,19 @@ export default function OfferDetailModal({
     }
   }, [currentOffer, shareOfferFn]);
 
+  const handleOpenSponsor = useCallback(() => {
+    if (!currentSponsor?.id) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (pathname === '/sponsor-detail' && sponsor?.id === currentSponsor.id) {
+      onClose();
+      return;
+    }
+
+    onClose();
+    router.push({ pathname: '/sponsor-detail', params: { sponsorId: currentSponsor.id } });
+  }, [currentSponsor?.id, currentSponsor, onClose, pathname, router, sponsor?.id]);
+
   const handleSendComment = useCallback(() => {
     if (!newComment.trim() || !currentOffer || !currentSponsor) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -257,7 +266,7 @@ export default function OfferDetailModal({
   if (!currentOffer) return null;
 
   const currentUserAvatar = profile.avatarUrl || profile.selfieUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=60';
-  const modalPageHeight = isProductCard ? PRODUCT_CARD_SNAP_INTERVAL : contentHeight;
+  const modalPageHeight = isProductCard ? SCREEN_W : contentHeight;
 
   const translateY = slideAnim.interpolate({
     inputRange: [0, 1],
@@ -293,8 +302,8 @@ export default function OfferDetailModal({
           }}
         >
           {!showComments ? (
-            <View style={[ms.feedContainer, isProductCard && ms.feedContainerCompact]}>
-              <View style={[ms.overlayTopControls, isProductCard && ms.overlayTopControlsCompact]}>
+            <View style={ms.feedContainer}>
+              <View style={ms.overlayTopControls}>
                 <TouchableOpacity onPress={onClose} style={ms.overlayCloseBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                   <X size={22} color="#FFFFFF" />
                 </TouchableOpacity>
@@ -306,41 +315,35 @@ export default function OfferDetailModal({
                 keyExtractor={(item, index) => `${item.offer.id}-${index}`}
                 renderItem={({ item }) => (
                   <TouchableOpacity activeOpacity={0.95} onPress={handleImagePress}>
-                    <View style={[ms.reelPage, isProductCard && ms.reelPageCompact, { height: modalPageHeight }]}>
-                      <View style={isProductCard ? ms.productCardShell : ms.reelMediaFill}>
-                        <Image
-                          source={{ uri: item.offer.imageUrl }}
-                          style={isProductCard ? ms.productCardImage : ms.reelImage}
-                          contentFit="cover"
-                          cachePolicy="memory-disk"
-                          placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-                          transition={400}
-                        />
-                        <LinearGradient
-                          colors={isProductCard ? ['rgba(3,7,18,0.02)', 'rgba(3,7,18,0.08)', 'rgba(3,7,18,0.46)'] : ['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.18)', 'rgba(0,0,0,0.84)']}
-                          style={isProductCard ? ms.productCardFade : ms.reelFade}
-                        />
-                        {isProductCard ? <View style={ms.productCardInnerStroke} /> : null}
-                      </View>
+                    <View style={[ms.reelPage, { height: modalPageHeight }]}>
+                      <Image
+                        source={{ uri: item.offer.imageUrl }}
+                        style={ms.reelImage}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                        transition={400}
+                      />
+                      <LinearGradient
+                        colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.18)', 'rgba(0,0,0,0.84)']}
+                        style={ms.reelFade}
+                      />
                     </View>
                   </TouchableOpacity>
                 )}
-                pagingEnabled={!isProductCard}
+                pagingEnabled
                 showsVerticalScrollIndicator={false}
                 decelerationRate="fast"
-                snapToInterval={isProductCard ? modalPageHeight : undefined}
-                disableIntervalMomentum={isProductCard}
                 snapToAlignment="start"
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfig}
                 getItemLayout={(_, index) => ({ length: modalPageHeight, offset: modalPageHeight * index, index })}
-                contentContainerStyle={isProductCard ? ms.productCardPagerContent : undefined}
                 initialNumToRender={2}
                 maxToRenderPerBatch={2}
                 windowSize={3}
               />
 
-              <View style={[ms.overlayContent, isProductCard && ms.overlayContentCompact]}>
+              <View style={ms.overlayContent}>
                 {modalEntries.length > 1 && (
                   <View style={ms.carouselDots}>
                     {modalEntries.map((_, idx) => (
@@ -350,6 +353,10 @@ export default function OfferDetailModal({
                 )}
 
                 <View style={ms.bottomRow}>
+                  <View style={ms.detailsSection}>
+                    <Text style={ms.offerDesc}>{currentOffer.description}</Text>
+                  </View>
+
                   <View style={ms.actionsRail}>
                     <TouchableOpacity onPress={handleLike} style={ms.actionRailBtn} activeOpacity={0.7}>
                       <Animated.View style={{ transform: [{ scale: heartScale }] }}>
@@ -373,6 +380,21 @@ export default function OfferDetailModal({
                     </TouchableOpacity>
                   </View>
                 </View>
+
+                <TouchableOpacity style={ms.overlaySponsorChip} onPress={handleOpenSponsor} activeOpacity={0.85}>
+                  <Image
+                    source={{ uri: currentSponsor?.logoUrl || currentSponsor?.imageUrl || currentOffer.imageUrl }}
+                    style={ms.overlaySponsorAvatar}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                    transition={200}
+                  />
+                  <View style={ms.overlaySponsorInfo}>
+                    <Text style={ms.overlaySponsorName} numberOfLines={1}>{currentSponsor?.name || currentOffer.sponsorName}</Text>
+                    <Text style={ms.overlaySponsorAddress} numberOfLines={2}>{currentSponsorAddress || 'Patrocinador parceiro'}</Text>
+                  </View>
+                </TouchableOpacity>
               </View>
             </View>
           ) : (
@@ -444,7 +466,7 @@ const ms = StyleSheet.create({
   containerCompact: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(2,6,23,0.78)',
+    backgroundColor: 'rgba(0,0,0,0.48)',
   },
   contentWrap: {
     flex: 1,
@@ -457,27 +479,18 @@ const ms = StyleSheet.create({
     flex: 0,
     flexGrow: 0,
     flexShrink: 0,
-    height: PRODUCT_CARD_VIEWPORT_HEIGHT,
+    height: SCREEN_W,
     width: SCREEN_W,
-    overflow: 'visible',
-    backgroundColor: 'transparent',
   },
   feedContainer: {
     flex: 1,
     backgroundColor: '#050505',
-  },
-  feedContainerCompact: {
-    backgroundColor: 'transparent',
   },
   overlayTopControls: {
     position: 'absolute',
     top: 14,
     right: 16,
     zIndex: 3,
-  },
-  overlayTopControlsCompact: {
-    top: PRODUCT_CARD_EDGE_PEEK + 10,
-    right: (SCREEN_W - PRODUCT_CARD_WIDTH) / 2 + 12,
   },
   overlayCloseBtn: {
     width: 42,
@@ -493,45 +506,9 @@ const ms = StyleSheet.create({
     width: SCREEN_W,
     backgroundColor: '#050505',
   },
-  reelPageCompact: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  reelMediaFill: {
-    flex: 1,
-  },
   reelImage: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#050505',
-  },
-  productCardShell: {
-    width: PRODUCT_CARD_WIDTH,
-    height: PRODUCT_CARD_HEIGHT,
-    borderRadius: 30,
-    overflow: 'hidden',
-    backgroundColor: '#07101F',
-    borderWidth: 1.5,
-    borderColor: 'rgba(125,211,252,0.76)',
-    shadowColor: '#38BDF8',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.24,
-    shadowRadius: 26,
-    elevation: 22,
-  },
-  productCardImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#07101F',
-  },
-  productCardFade: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  productCardInnerStroke: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
   },
   reelFade: {
     ...StyleSheet.absoluteFillObject,
@@ -543,18 +520,43 @@ const ms = StyleSheet.create({
     bottom: 18,
     gap: 12,
   },
-  overlayContentCompact: {
-    left: (SCREEN_W - PRODUCT_CARD_WIDTH) / 2 + 14,
-    right: (SCREEN_W - PRODUCT_CARD_WIDTH) / 2 + 14,
-    bottom: PRODUCT_CARD_EDGE_PEEK + 18,
+  overlaySponsorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.36)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  overlaySponsorAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  overlaySponsorInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  overlaySponsorName: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '800' as const,
+  },
+  overlaySponsorAddress: {
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 12,
+    width: '100%',
+    lineHeight: 17,
   },
   carouselDots: {
     flexDirection: 'row',
     gap: 6,
     alignSelf: 'center',
-  },
-  productCardPagerContent: {
-    paddingVertical: PRODUCT_CARD_EDGE_PEEK,
   },
   dot: {
     width: 7,
@@ -569,7 +571,7 @@ const ms = StyleSheet.create({
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: 18,
     paddingTop: 14,
   },
@@ -590,6 +592,16 @@ const ms = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
+  detailsSection: {
+    flex: 1,
+    paddingBottom: 8,
+  },
+  offerDesc: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.78)',
+    lineHeight: 20,
+    maxWidth: '92%',
+  },
   commentInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -601,15 +613,9 @@ const ms = StyleSheet.create({
     gap: 10,
   },
   commentInputWrapCompact: {
-    width: PRODUCT_CARD_WIDTH,
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderTopWidth: 0,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.16)',
-    borderRadius: 22,
-    backgroundColor: 'rgba(7,11,22,0.92)',
+    width: SCREEN_W,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     overflow: 'hidden',
   },
   inputAvatar: {

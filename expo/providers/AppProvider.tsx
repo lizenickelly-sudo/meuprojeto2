@@ -3,6 +3,7 @@ import { ReactNode } from 'react';
 import { UserProvider, useUser } from '@/providers/UserProvider';
 import { SponsorProvider, useSponsor } from '@/providers/SponsorProvider';
 import { AdminProvider, useAdmin } from '@/providers/AdminProvider';
+import { SponsorPortalProvider, useSponsorPortal } from '@/providers/SponsorPortalProvider';
 import { CouponProvider, useCoupon } from '@/providers/CouponProvider';
 import { NotificationProvider, useNotifications } from '@/providers/NotificationProvider';
 import { Coupon, Transaction } from '@/types';
@@ -12,11 +13,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <UserProvider>
       <SponsorProvider>
         <AdminProvider>
-          <CouponProvider>
-            <NotificationProvider>
-              {children}
-            </NotificationProvider>
-          </CouponProvider>
+          <SponsorPortalProvider>
+            <CouponProvider>
+              <NotificationProvider>
+                {children}
+              </NotificationProvider>
+            </CouponProvider>
+          </SponsorPortalProvider>
         </AdminProvider>
       </SponsorProvider>
     </UserProvider>
@@ -27,6 +30,7 @@ export function useApp() {
   const user = useUser();
   const sponsor = useSponsor();
   const admin = useAdmin();
+  const sponsorPortal = useSponsorPortal();
   const coupon = useCoupon();
   const notif = useNotifications();
 
@@ -108,6 +112,18 @@ export function useApp() {
     getSetupSQL: admin.getSetupSQL,
     fetchUsers: admin.fetchUsers,
 
+    sponsorPortalSession: sponsorPortal.sponsorSession,
+    currentSponsorPortal: sponsorPortal.currentSponsor,
+    sponsorTickets: sponsorPortal.sponsorTickets,
+    allSponsorTickets: sponsorPortal.allSponsorTickets,
+    sponsorPortalLogin: sponsorPortal.login,
+    sponsorPortalLogout: sponsorPortal.logout,
+    configureSponsorAccess: sponsorPortal.configureSponsorAccess,
+    registerSponsorTicketFromQr: sponsorPortal.registerTicketFromQr,
+    requestSponsorTicketPayment: sponsorPortal.requestTicketPayment,
+    markSponsorTicketPaid: sponsorPortal.markTicketPaid,
+    refuseSponsorTicket: sponsorPortal.refuseTicket,
+
     coupons: coupon.coupons,
     validCoupons: coupon.validCoupons,
     usedCoupons: coupon.usedCoupons,
@@ -132,5 +148,6 @@ export function useApp() {
 export { useUser } from '@/providers/UserProvider';
 export { useSponsor } from '@/providers/SponsorProvider';
 export { useAdmin } from '@/providers/AdminProvider';
+export { useSponsorPortal } from '@/providers/SponsorPortalProvider';
 export { useCoupon } from '@/providers/CouponProvider';
 export { useNotifications } from '@/providers/NotificationProvider';

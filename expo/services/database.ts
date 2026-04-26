@@ -3,7 +3,7 @@ import { mockWinners, mockGrandPrize } from '@/mocks/winners';
 import { mockLeaderboard } from '@/mocks/leaderboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSponsorVideoStorageSetupSql } from '@/lib/sponsorMedia';
-import type { CouponBatch, ManagedCity, PromotionalQR, Sponsor, Winner, GrandPrize, UserProfile } from '@/types';
+import type { CouponBatch, ManagedCity, PromotionalQR, Sponsor, SponsorTicketRecord, Winner, GrandPrize, UserProfile } from '@/types';
 import type { LeaderboardEntry } from '@/mocks/leaderboard';
 
 const DB_KEYS = {
@@ -78,6 +78,14 @@ type RemotePromoQRCodeRow = {
   city?: string | null;
   state?: string | null;
   data?: Partial<PromotionalQR> | null;
+  created_at?: string | null;
+};
+
+type RemoteSponsorTicketRow = {
+  id: string;
+  sponsor_id?: string | null;
+  status?: string | null;
+  data?: Partial<SponsorTicketRecord> | null;
   created_at?: string | null;
 };
 
@@ -244,6 +252,9 @@ function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
     galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages as Sponsor['galleryImages'] : [],
     promotionalVideos: promotionalVideos as Sponsor['promotionalVideos'],
     cityBonusConfig: normalizeSponsorCityBonusConfig(data.cityBonusConfig),
+    sponsorPanelEmail: data.sponsorPanelEmail ? String(data.sponsorPanelEmail).trim().toLowerCase() : undefined,
+    sponsorPanelPasswordHash: data.sponsorPanelPasswordHash ? String(data.sponsorPanelPasswordHash) : undefined,
+    sponsorPanelEnabledAt: data.sponsorPanelEnabledAt ? String(data.sponsorPanelEnabledAt) : undefined,
     ratingsByUser,
     ratingAverage: ratingSummary.ratingAverage,
     ratingCount: ratingSummary.ratingCount,
@@ -344,6 +355,55 @@ function buildRemotePromoQRCodeRow(code: PromotionalQR): RemotePromoQRCodeRow {
     state: code.state,
     data: code,
     created_at: code.createdAt || new Date().toISOString(),
+  };
+}
+
+function mapRemoteSponsorTicketRow(row: RemoteSponsorTicketRow): SponsorTicketRecord | null {
+  const data = toRecord(row.data);
+  const id = row.id || String(data.id || '');
+  const sponsorId = row.sponsor_id ?? String(data.sponsorId || '');
+  const code = String(data.code || '');
+  const batchId = String(data.batchId || '');
+
+  if (!id || !sponsorId || !code || !batchId) return null;
+
+  const rawStatus = String(row.status || data.status || 'available');
+  const status: SponsorTicketRecord['status'] = rawStatus === 'pending_payment' || rawStatus === 'paid' || rawStatus === 'refused'
+    ? rawStatus
+    : 'available';
+
+  return {
+    id,
+    sponsorId,
+    sponsorName: String(data.sponsorName || ''),
+    batchId,
+    code,
+    value: toFiniteNumber(data.value, 0),
+    createdAt: String(data.createdAt || row.created_at || new Date().toISOString()),
+    registeredAt: data.registeredAt ? String(data.registeredAt) : undefined,
+    lastScannedAt: data.lastScannedAt ? String(data.lastScannedAt) : undefined,
+    status,
+    customerEmail: data.customerEmail ? String(data.customerEmail) : undefined,
+    customerName: data.customerName ? String(data.customerName) : undefined,
+    customerPixKey: data.customerPixKey ? String(data.customerPixKey) : undefined,
+    customerPixKeyType: data.customerPixKeyType === 'cpf' || data.customerPixKeyType === 'phone' || data.customerPixKeyType === 'email' || data.customerPixKeyType === 'random'
+      ? data.customerPixKeyType
+      : undefined,
+    paymentRequestedAt: data.paymentRequestedAt ? String(data.paymentRequestedAt) : undefined,
+    paidAt: data.paidAt ? String(data.paidAt) : undefined,
+    paidBySponsorAt: data.paidBySponsorAt ? String(data.paidBySponsorAt) : undefined,
+    paidMessage: data.paidMessage ? String(data.paidMessage) : undefined,
+    refusalReason: data.refusalReason ? String(data.refusalReason) : undefined,
+  };
+}
+
+function buildRemoteSponsorTicketRow(ticket: SponsorTicketRecord): RemoteSponsorTicketRow {
+  return {
+    id: ticket.id,
+    sponsor_id: ticket.sponsorId,
+    status: ticket.status,
+    data: ticket,
+    created_at: ticket.createdAt || new Date().toISOString(),
   };
 }
 
@@ -700,6 +760,56 @@ async function syncPromoQRCodesTable(codes: PromotionalQR[]): Promise<boolean> {
   return true;
 }
 
+async function fetchSponsorTicketsTable(): Promise<RemoteSponsorTicketRow[] | null> {
+  if (!hasSupabaseConfig()) return null;
+
+  const res = await supabaseRequest('/rest/v1/sponsor_tickets?select=id,sponsor_id,status,data,created_at&order=created_at.desc', { method: 'GET' });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.log('[DB] Supabase fetch sponsor_tickets table failed:', errorText);
+    return null;
+  }
+
+  return (await res.json()) as RemoteSponsorTicketRow[];
+}
+
+async function syncSponsorTicketsTable(tickets: SponsorTicketRecord[]): Promise<boolean> {
+  if (!hasSupabaseConfig()) return false;
+
+  const currentRows = await fetchSponsorTicketsTable();
+  if (currentRows === null) return false;
+
+  if (tickets.length > 0) {
+    const payload = tickets.map(buildRemoteSponsorTicketRow);
+    const upsertRes = await supabaseRequest('/rest/v1/sponsor_tickets?on_conflict=id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upsertRes.ok) {
+      const errorText = await upsertRes.text();
+      console.log('[DB] Supabase upsert sponsor_tickets failed:', errorText);
+      return false;
+    }
+  }
+
+  const nextIds = new Set(tickets.map((ticket) => ticket.id));
+  const idsToDelete = currentRows.map((row) => row.id).filter((id) => !nextIds.has(id));
+  for (const ticketId of idsToDelete) {
+    const deleteRes = await supabaseRequest(`/rest/v1/sponsor_tickets?id=eq.${encodeURIComponent(ticketId)}`, {
+      method: 'DELETE',
+    });
+    if (!deleteRes.ok) {
+      const errorText = await deleteRes.text();
+      console.log('[DB] Supabase delete sponsor_ticket failed:', ticketId, errorText);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function upsertRemoteAppState<T>(key: string, value: T): Promise<boolean> {
   if (!hasSupabaseConfig()) return false;
 
@@ -827,6 +937,28 @@ export async function syncPromoQRCodes(codes: PromotionalQR[]): Promise<boolean>
   }
 
   return upsertRemoteAppState('promo_qr_codes', codes);
+}
+
+export async function fetchSponsorTickets(): Promise<SponsorTicketRecord[]> {
+  if (!hasSupabaseConfig()) return [];
+
+  const tableRows = await fetchSponsorTicketsTable();
+  if (tableRows !== null) {
+    if (tableRows.length > 0) {
+      console.log('[DB] Using remote sponsor tickets from Supabase sponsor_tickets table');
+      return tableRows
+        .map(mapRemoteSponsorTicketRow)
+        .filter((ticket): ticket is SponsorTicketRecord => Boolean(ticket));
+    }
+
+    console.log('[DB] No rows found in Supabase sponsor_tickets table');
+  }
+
+  return [];
+}
+
+export async function syncSponsorTickets(tickets: SponsorTicketRecord[]): Promise<boolean> {
+  return syncSponsorTicketsTable(tickets);
 }
 
 export async function syncCityPrizes(prizes: Record<string, GrandPrize>): Promise<boolean> {
@@ -1243,7 +1375,7 @@ export async function seedAllToSupabase(): Promise<SeedResult> {
 export async function checkTablesExist(): Promise<{ missing: string[]; errors: Record<string, string> }> {
   if (!hasSupabaseConfig()) {
     return {
-      missing: ['users', 'app_state'],
+      missing: ['users', 'app_state', 'sponsor_tickets'],
       errors: { config: 'Configure EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY (ou EXPO_PUBLIC_SUPABASE_KEY)' },
     };
   }
@@ -1252,6 +1384,7 @@ export async function checkTablesExist(): Promise<{ missing: string[]; errors: R
     const tables = [
       { name: 'users', select: 'email' },
       { name: 'app_state', select: 'key' },
+      { name: 'sponsor_tickets', select: 'id' },
     ];
     const missing: string[] = [];
     const errors: Record<string, string> = {};
@@ -1269,7 +1402,7 @@ export async function checkTablesExist(): Promise<{ missing: string[]; errors: R
 
     return { missing, errors };
   } catch (error) {
-    return { missing: ['users', 'app_state'], errors: { users: String(error), app_state: String(error) } };
+    return { missing: ['users', 'app_state', 'sponsor_tickets'], errors: { users: String(error), app_state: String(error), sponsor_tickets: String(error) } };
   }
 }
 
@@ -1312,6 +1445,18 @@ create table if not exists public.app_state (
 );
 
 create index if not exists app_state_updated_at_idx on public.app_state (updated_at desc);
+
+create table if not exists public.sponsor_tickets (
+  id text primary key,
+  sponsor_id text not null,
+  status text not null default 'available',
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists sponsor_tickets_sponsor_id_idx on public.sponsor_tickets (sponsor_id);
+create index if not exists sponsor_tickets_status_idx on public.sponsor_tickets (status);
+create index if not exists sponsor_tickets_created_at_idx on public.sponsor_tickets (created_at desc);
 `;
 
 export function getSetupSql(): string {

@@ -96,6 +96,9 @@ export interface Sponsor {
   ratingAverage?: number;
   ratingCount?: number;
   ratingTotal?: number;
+  sponsorPanelEmail?: string;
+  sponsorPanelPasswordHash?: string;
+  sponsorPanelEnabledAt?: string;
 }
 
 export interface CityBonusMissionNotificationMetadata {
@@ -212,6 +215,30 @@ export interface CouponBatch {
   prefix: string;
   createdAt: string;
   codes: string[];
+}
+
+export type SponsorTicketStatus = 'available' | 'pending_payment' | 'paid' | 'refused';
+
+export interface SponsorTicketRecord {
+  id: string;
+  sponsorId: string;
+  sponsorName: string;
+  batchId: string;
+  code: string;
+  value: number;
+  createdAt: string;
+  registeredAt?: string;
+  lastScannedAt?: string;
+  status: SponsorTicketStatus;
+  customerEmail?: string;
+  customerName?: string;
+  customerPixKey?: string;
+  customerPixKeyType?: 'cpf' | 'phone' | 'email' | 'random';
+  paymentRequestedAt?: string;
+  paidAt?: string;
+  paidBySponsorAt?: string;
+  paidMessage?: string;
+  refusalReason?: string;
 }
 
 export interface AdminNotification {
