@@ -8,8 +8,10 @@ import OfferDetailModal from '@/components/OfferDetailModal';
 import type { Offer, Sponsor } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const CARD_W = SCREEN_W - 64;
+const CARD_W = SCREEN_W - 84;
+const CARD_H = 264;
 const CARD_GAP = 12;
+const CARD_SIDE_INSET = (SCREEN_W - CARD_W) / 2;
 const SNAP_INTERVAL = CARD_W + CARD_GAP;
 const AUTO_SCROLL_INTERVAL = 4000;
 const CARD_BORDER_BLUE = '#3B82F6';
@@ -27,9 +29,6 @@ function PromotionalCard({
   onOpenOffer: () => void;
 }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const sponsorAddress = [item.sponsor.address, `${item.sponsor.city} - ${item.sponsor.state}`]
-    .filter(Boolean)
-    .join(' • ');
 
   const handlePressIn = useCallback(() => {
     Animated.spring(scaleAnim, { toValue: 0.97, friction: 8, useNativeDriver: true }).start();
@@ -54,23 +53,7 @@ function PromotionalCard({
           contentFit="contain"
           contentPosition="center"
           cachePolicy="memory-disk"
-          placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-          transition={400}
         />
-        <View style={pc.infoStrip}>
-          <Image
-            source={{ uri: item.sponsor.logoUrl }}
-            style={pc.sponsorAvatar}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-            transition={300}
-          />
-          <View style={pc.infoTextWrap}>
-            <Text style={pc.sponsorName} numberOfLines={1}>{item.sponsor.name}</Text>
-            <Text style={pc.sponsorAddress} numberOfLines={1}>{sponsorAddress}</Text>
-          </View>
-        </View>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -87,7 +70,7 @@ const pc = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: CARD_BORDER_BLUE,
-    minHeight: 240,
+    height: CARD_H,
     justifyContent: 'space-between',
     shadowColor: CARD_BORDER_BLUE,
     shadowOffset: { width: 0, height: 4 },
@@ -98,46 +81,6 @@ const pc = StyleSheet.create({
   backgroundImage: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#0F172A',
-  },
-  infoStrip: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 10,
-    zIndex: 1,
-    borderRadius: 16,
-    backgroundColor: 'rgba(15,23,42,0.42)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  sponsorAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.dark.surfaceLight,
-    borderWidth: 2,
-    borderColor: 'rgba(59,130,246,0.75)',
-  },
-  infoTextWrap: {
-    flex: 1,
-  },
-  sponsorName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700' as const,
-    textShadowColor: 'rgba(15,23,42,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  sponsorAddress: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 11,
-    marginTop: 1,
   },
 });
 
@@ -359,6 +302,6 @@ const pf = StyleSheet.create({
     borderRadius: 3,
   },
   listContent: {
-    paddingHorizontal: 32 - CARD_GAP / 2,
+    paddingHorizontal: CARD_SIDE_INSET - CARD_GAP / 2,
   },
 });

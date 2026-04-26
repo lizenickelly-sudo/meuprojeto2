@@ -63,6 +63,13 @@ export interface SponsorVideo {
   likes?: number;
 }
 
+export interface SponsorCityBonusConfig {
+  qrCode: string;
+  timeLimitMinutes: number;
+  rewardLabel?: string;
+  voiceIntro?: string;
+}
+
 export interface Sponsor {
   id: string;
   name: string;
@@ -84,10 +91,27 @@ export interface Sponsor {
   stories?: SponsorStory[];
   galleryImages?: SponsorImage[];
   promotionalVideos?: SponsorVideo[];
+  cityBonusConfig?: SponsorCityBonusConfig;
   ratingsByUser?: Record<string, number>;
   ratingAverage?: number;
   ratingCount?: number;
   ratingTotal?: number;
+}
+
+export interface CityBonusMissionNotificationMetadata {
+  kind?: 'lottery_claim' | 'identity_verification' | 'city_bonus';
+  sponsorId?: string;
+  sponsorName?: string;
+  sponsorAddress?: string;
+  sponsorCity?: string;
+  sponsorState?: string;
+  rewardLabel?: string;
+  bonusQrCode?: string;
+  bonusTimeLimitMinutes?: number;
+  expiresAt?: string;
+  claimedBy?: string[];
+  claimedAtByUser?: Record<string, string>;
+  voiceIntro?: string;
 }
 
 export interface SponsorStory {
@@ -194,11 +218,10 @@ export interface AdminNotification {
   id: string;
   title: string;
   message: string;
-  type: 'general' | 'promo' | 'prize' | 'identity_verification';
+  type: 'general' | 'promo' | 'prize' | 'identity_verification' | 'city_bonus';
   createdAt: string;
   sent: boolean;
-  metadata?: {
-    kind?: 'lottery_claim' | 'identity_verification';
+  metadata?: CityBonusMissionNotificationMetadata & {
     ticketId?: string;
     drawId?: string;
     lotteryCode?: string;

@@ -193,6 +193,19 @@ function normalizePromotionalVideos(value: unknown, sponsorId: string, updatedAt
   }, []);
 }
 
+function normalizeSponsorCityBonusConfig(value: unknown): Sponsor['cityBonusConfig'] | undefined {
+  const data = toRecord(value);
+  const qrCode = String(data.qrCode || '').trim();
+  if (!qrCode) return undefined;
+
+  return {
+    qrCode,
+    timeLimitMinutes: Math.max(1, toFiniteNumber(data.timeLimitMinutes, 15)),
+    rewardLabel: data.rewardLabel ? String(data.rewardLabel) : undefined,
+    voiceIntro: data.voiceIntro ? String(data.voiceIntro) : undefined,
+  };
+}
+
 function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
   const data = toRecord(row.data);
   const sponsorId = row.id || String(data.id || '');
@@ -230,6 +243,7 @@ function mapRemoteSponsorRowToSponsor(row: RemoteSponsorRow): Sponsor {
     stories: Array.isArray(data.stories) ? data.stories as Sponsor['stories'] : [],
     galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages as Sponsor['galleryImages'] : [],
     promotionalVideos: promotionalVideos as Sponsor['promotionalVideos'],
+    cityBonusConfig: normalizeSponsorCityBonusConfig(data.cityBonusConfig),
     ratingsByUser,
     ratingAverage: ratingSummary.ratingAverage,
     ratingCount: ratingSummary.ratingCount,
