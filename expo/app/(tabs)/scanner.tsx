@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated, ScrollVie
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
-import { CheckCircle, XCircle, Clock, Camera, FlashlightOff, Flashlight, RefreshCw, ArrowRight, Wallet, DollarSign, Ticket, ScanLine, AlertTriangle, Gift, MapPin, Store, ShoppingBag, Settings } from 'lucide-react-native';
+import { CheckCircle, XCircle, Clock, Camera, FlashlightOff, Flashlight, RefreshCw, ArrowRight, DollarSign, Ticket, ScanLine, AlertTriangle, Gift, MapPin, Store, ShoppingBag, Settings } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Colors from '@/constants/colors';
@@ -12,6 +12,7 @@ import { useUser } from '@/providers/UserProvider';
 import { useSponsor } from '@/providers/SponsorProvider';
 import { useCoupon } from '@/providers/CouponProvider';
 import { useAdmin } from '@/providers/AdminProvider';
+import { useSponsorPortal } from '@/providers/SponsorPortalProvider';
 import type { Coupon, PromotionalQR, CouponBatch } from '@/types';
 
 console.log('[Scanner] expo-camera imported successfully');
@@ -66,7 +67,7 @@ function SimulatedScanner({ onScan }: { onScan: () => void }) {
     ]));
     l.start();
     return () => l.stop();
-  }, []);
+  }, [sla]);
 
   const sly = sla.interpolate({ inputRange: [0, 1], outputRange: [-60, 60] });
 
@@ -101,7 +102,7 @@ function NativeScanner({ onScan, isScanning }: { onScan: (data: string) => void;
     ]));
     l.start();
     return () => l.stop();
-  }, []);
+  }, [sla]);
 
   useEffect(() => {
     if (isScanning) {
@@ -202,8 +203,9 @@ export default function ScannerScreen() {
   const scrollRef = useRef<ScrollView | null>(null);
   const { coupons, addCouponRaw, addScannedMessage, markCodeRedeemed, isCodeRedeemed } = useCoupon();
   const { sponsors: allSponsors } = useSponsor();
-  const { addBalance, addTransaction } = useUser();
+  const { addBalance, addTransaction, profile } = useUser();
   const { promoQRCodes, couponBatches } = useAdmin();
+  const { requestTicketPayment } = useSponsorPortal();
 
   const addCoupon = useCallback((c: Coupon) => {
     addCouponRaw(c);
@@ -295,7 +297,18 @@ export default function ScannerScreen() {
     return { valid: false, errorTitle: 'Cupom Não Encontrado', errorMsg: 'QR Code não corresponde a nenhum cupom válido.', errorType: 'invalid' as const };
   }, [isCodeRedeemed, coupons, couponBatches]);
 
-  const processScannedCode = useCallback((rawData?: string) => {
+  const getCurrentPixKey = useCallback(() => {
+    if (profile.pixKey?.trim()) {
+      return { key: profile.pixKey.trim(), type: profile.pixKeyType };
+    }
+    if (profile.pixCpf?.trim()) return { key: profile.pixCpf.trim(), type: 'cpf' as const };
+    if (profile.pixPhone?.trim()) return { key: profile.pixPhone.trim(), type: 'phone' as const };
+    if (profile.pixEmail?.trim()) return { key: profile.pixEmail.trim(), type: 'email' as const };
+    if (profile.pixRandom?.trim()) return { key: profile.pixRandom.trim(), type: 'random' as const };
+    return null;
+  }, [profile.pixCpf, profile.pixEmail, profile.pixKey, profile.pixKeyType, profile.pixPhone, profile.pixRandom]);
+
+  const processScannedCode = useCallback(async (rawData?: string) => {
     if (rawData) {
       try {
         const parsed = JSON.parse(rawData);
@@ -314,6 +327,31 @@ export default function ScannerScreen() {
         if (parsed.type === 'cashbox_coupon' && parsed.code && parsed.value) {
           const validation = validateRealCoupon(parsed);
           if (!validation.valid) { showErrorModal(validation.errorTitle ?? 'Erro', validation.errorMsg ?? 'Cupom inválido.', validation.errorType ?? 'invalid'); return; }
+          if (validation.batch || parsed.batchId) {
+            const pixData = getCurrentPixKey();
+            if (!pixData) {
+              showErrorModal('PIX nao configurado', 'Cadastre uma chave PIX no seu perfil antes de escanear este bilhete.', 'invalid');
+              return;
+            }
+            const paymentResult = await requestTicketPayment({
+              code: parsed.code,
+              batchId: parsed.batchId,
+              sponsorId: parsed.sponsorId,
+              sponsorName: parsed.sponsorName,
+              value: parsed.value,
+            }, {
+              ...profile,
+              pixKey: pixData.key,
+              pixKeyType: pixData.type,
+            });
+            if (paymentResult.outcome === 'pending') {
+              showErrorModal('Bilhete Recusado', paymentResult.message, 'invalid');
+              return;
+            }
+            const isAlreadyUsed = /ja utilizado|ja foi pago|pago e registrado/i.test(paymentResult.message);
+            showErrorModal(isAlreadyUsed ? 'Cupom Já Utilizado' : 'Bilhete Recusado', paymentResult.message, isAlreadyUsed ? 'duplicate' : 'invalid');
+            return;
+          }
           if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           const coupon: Coupon = {
             id: `cpn_${Date.now()}`, code: parsed.code, value: parsed.value,
@@ -332,13 +370,28 @@ export default function ScannerScreen() {
         if (matchedBatch) {
           if (isCodeRedeemed(rawData)) { showErrorModal('Cupom Já Utilizado', `O código já foi escaneado.`, 'duplicate'); return; }
           if (coupons.find((c) => c.code === rawData)) { showErrorModal('Cupom Já Salvo', `Cupom já está na sua conta.`, 'duplicate'); return; }
-          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          const coupon: Coupon = {
-            id: `cpn_${Date.now()}`, code: rawData, value: matchedBatch.value, sponsorId: matchedBatch.sponsorId, sponsorName: matchedBatch.sponsorName,
-            status: 'valid', scannedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), drawId: `draw_${Date.now()}`,
-          };
-          markCodeRedeemed(rawData); addCoupon(coupon); setLast(coupon); setShow(true); setIsScanning(false);
-          sa.setValue(0); Animated.spring(sa, { toValue: 1, friction: 4, useNativeDriver: true }).start();
+          const pixData = getCurrentPixKey();
+          if (!pixData) {
+            showErrorModal('PIX nao configurado', 'Cadastre uma chave PIX no seu perfil antes de escanear este bilhete.', 'invalid');
+            return;
+          }
+          const paymentResult = await requestTicketPayment({
+            code: rawData,
+            batchId: matchedBatch.id,
+            sponsorId: matchedBatch.sponsorId,
+            sponsorName: matchedBatch.sponsorName,
+            value: matchedBatch.value,
+          }, {
+            ...profile,
+            pixKey: pixData.key,
+            pixKeyType: pixData.type,
+          });
+          if (paymentResult.outcome === 'pending') {
+            showErrorModal('Bilhete Recusado', paymentResult.message, 'invalid');
+            return;
+          }
+          const isAlreadyUsed = /ja utilizado|ja foi pago|pago e registrado/i.test(paymentResult.message);
+          showErrorModal(isAlreadyUsed ? 'Cupom Já Utilizado' : 'Bilhete Recusado', paymentResult.message, isAlreadyUsed ? 'duplicate' : 'invalid');
           return;
         }
         showErrorModal('QR Code Inválido', 'QR Code não reconhecido pelo sistema.', 'invalid');
@@ -356,7 +409,7 @@ export default function ScannerScreen() {
       addCoupon(coupon); setLast(coupon); setShow(true); setIsScanning(false);
       sa.setValue(0); Animated.spring(sa, { toValue: 1, friction: 4, useNativeDriver: true }).start();
     }
-  }, [addCoupon, sa, allSponsors, promoQRCodes, showPromoModal, validateRealCoupon, showErrorModal, markCodeRedeemed, couponBatches, isCodeRedeemed, coupons]);
+  }, [addCoupon, couponBatches, coupons, getCurrentPixKey, isCodeRedeemed, markCodeRedeemed, profile, promoQRCodes, requestTicketPayment, sa, allSponsors, showPromoModal, showErrorModal, validateRealCoupon]);
 
   const handleBarcodeScan = useCallback((data: string) => {
     let decodedData = data;

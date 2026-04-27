@@ -1375,7 +1375,7 @@ export async function seedAllToSupabase(): Promise<SeedResult> {
 export async function checkTablesExist(): Promise<{ missing: string[]; errors: Record<string, string> }> {
   if (!hasSupabaseConfig()) {
     return {
-      missing: ['users', 'app_state'],
+      missing: ['users', 'app_state', 'sponsor_tickets'],
       errors: { config: 'Configure EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY (ou EXPO_PUBLIC_SUPABASE_KEY)' },
     };
   }

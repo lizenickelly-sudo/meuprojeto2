@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { CouponBatch, AdminNotification, GrandPrize, PromotionalQR, ManagedCity } from '@/types';
 import { hashPin, verifyPin } from '@/lib/crypto';
 import { invalidateDomainKey, readDomainCache, writeDomainCache } from '@/lib/stateCache';
+import { hasSupabaseConfig, supabase } from '@/lib/supabase';
 import {
   fetchAppState as dbFetchAppState,
   saveAppState as dbSaveAppState,
@@ -49,6 +51,16 @@ const ADMIN_CACHE_KEYS = {
 } as const;
 
 type AdminCacheKey = (typeof ADMIN_CACHE_KEYS)[keyof typeof ADMIN_CACHE_KEYS];
+
+function normalizeLocationText(value?: string | null): string {
+  if (!value) return '';
+
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
 
 export const [AdminProvider, useAdmin] = createContextHook(() => {
   const queryClient = useQueryClient();
@@ -223,6 +235,44 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
   useEffect(() => {
     if (promoQRQuery.data) setPromoQRCodes(promoQRQuery.data);
   }, [promoQRQuery.data]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state !== 'active') return;
+
+      console.log('[AdminProvider] App resumed - refreshing notifications for map state');
+      queryClient.refetchQueries({ queryKey: ['admin_notifications'], exact: true });
+    });
+
+    return () => subscription.remove();
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig) return;
+
+    const channel = supabase
+      .channel('admin-notifications-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_state',
+          filter: 'key=eq.notifications',
+        },
+        () => {
+          console.log('[AdminProvider] Notifications changed in Supabase, refreshing admin notifications');
+          queryClient.refetchQueries({ queryKey: ['admin_notifications'], exact: true });
+        },
+      )
+      .subscribe((status) => {
+        console.log('[AdminProvider] Notifications realtime status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   const setAdminMutation = useMutation({
     mutationFn: async (val: boolean) => {
@@ -417,9 +467,49 @@ export const [AdminProvider, useAdmin] = createContextHook(() => {
     await saveManagedCitiesMutation.mutateAsync(updatedCities);
   }, [managedCities, saveManagedCitiesMutation]);
 
-  const getCityImage = useCallback((city: string): string | null => {
-    return cityImages[city] ?? null;
-  }, [cityImages]);
+  const getCityImage = useCallback((city: string, state?: string): string | null => {
+    const trimmedCity = city.trim();
+    const normalizedCity = normalizeLocationText(trimmedCity);
+    const normalizedState = normalizeLocationText(state);
+    if (!normalizedCity) return null;
+
+    const exactManagedCity = managedCities.find((managedCity) => {
+      if (normalizeLocationText(managedCity.city) !== normalizedCity) return false;
+      if (!managedCity.imageUrl?.trim()) return false;
+      if (!normalizedState) return true;
+      return normalizeLocationText(managedCity.state) === normalizedState;
+    });
+    if (exactManagedCity?.imageUrl?.trim()) {
+      return exactManagedCity.imageUrl.trim();
+    }
+
+    const stateAgnosticManagedCity = managedCities.find((managedCity) => {
+      return normalizeLocationText(managedCity.city) === normalizedCity
+        && !normalizeLocationText(managedCity.state)
+        && Boolean(managedCity.imageUrl?.trim());
+    });
+    if (stateAgnosticManagedCity?.imageUrl?.trim()) {
+      return stateAgnosticManagedCity.imageUrl.trim();
+    }
+
+    const directImage = cityImages[trimmedCity]?.trim();
+    if (directImage) {
+      return directImage;
+    }
+
+    const normalizedImageEntry = Object.entries(cityImages).find(([key, imageUrl]) => {
+      return normalizeLocationText(key) === normalizedCity && Boolean(imageUrl?.trim());
+    });
+    if (normalizedImageEntry?.[1]?.trim()) {
+      return normalizedImageEntry[1].trim();
+    }
+
+    const cityOnlyManagedCity = managedCities.find((managedCity) => {
+      return normalizeLocationText(managedCity.city) === normalizedCity && Boolean(managedCity.imageUrl?.trim());
+    });
+
+    return cityOnlyManagedCity?.imageUrl?.trim() ?? null;
+  }, [cityImages, managedCities]);
 
   const addManagedCity = useCallback((city: ManagedCity) => {
     const normalizedCity = city.city.trim().toLowerCase();
